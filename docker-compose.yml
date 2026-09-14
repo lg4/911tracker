@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: oneida911
+      POSTGRES_USER: oneida
+      POSTGRES_PASSWORD: oneida
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oneida -d oneida911"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Phase 1 runs the ingestion poller. Phase 2/3 add the API + web UI on top of this service.
+  ingest:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://oneida:oneida@db:5432/oneida911
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: always
+
+volumes:
+  db_data:

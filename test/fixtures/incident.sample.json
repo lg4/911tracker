@@ -1,0 +1,56 @@
+[
+  {
+    "ClassName": "App\\Model\\NineOneOneIncident",
+    "LastEdited": "2026-09-14 09:59:01",
+    "Created": "2026-09-14 09:59:01",
+    "CallNumber": "993",
+    "Title": "2026-00005096",
+    "Date": "2026-09-14 09:49:14",
+    "Status": "In Progress",
+    "Type": "MVA-PD",
+    "Departments": "Utica Police Department, Oneida County Emergency Services",
+    "Location": "MOHAWK ST @ SOUTH ST, UTICA",
+    "Lat": "43.092258604",
+    "Lng": "-75.221273068",
+    "Icon": "police",
+    "ID": 700079
+  },
+  {
+    "ClassName": "App\\Model\\NineOneOneIncident",
+    "LastEdited": "2026-01-15 08:05:00",
+    "Created": "2026-01-15 08:05:00",
+    "CallNumber": "120",
+    "Title": "2026-00000001",
+    "Date": "2026-01-15 08:00:00",
+    "Status": "Resolved",
+    "Type": "CHECK WELFARE",
+    "Departments": "New Hartford Police Department",
+    "Location": "BURRSTONE RD, NEW HARTFORD",
+    "Lat": "43.0938093",
+    "Lng": "-75.2763939",
+    "Icon": "police",
+    "ID": 700001
+  },
+  {
+    "ClassName": "App\\Model\\NineOneOneIncident",
+    "Title": "2026-00009999",
+    "Date": "2026-09-14 09:00:00",
+    "Status": "In Progress",
+    "Type": "MVA-FD",
+    "Departments": "Some Fire",
+    "Location": "OUTSIDE COUNTY, ELSEWHERE",
+    "Lat": "44.99",
+    "Lng": "-75.3",
+    "Icon": "fire",
+    "ID": 700999
+  },
+  {
+    "ClassName": "App\\Model\\NineOneOneIncident",
+    "Title": "2026-00008888",
+    "Date": "2026-09-14 09:10:00",
+    "Status": "In Progress",
+    "Type": "SOME-TYPE",
+    "Departments": "No Coords Dept",
+    "Location": "MISSING COORDS"
+  }
+]

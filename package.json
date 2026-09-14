@@ -1,0 +1,21 @@
+{
+  "name": "oneida-911-mapper",
+  "version": "0.1.0",
+  "description": "Polls Oneida County NY 911 live activity feed and accumulates a local historical DB for an open-source heatmap map.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "poll:once": "node src/poll-once.js",
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.5",
+    "luxon": "^3.4.4",
+    "pg": "^8.12.0"
+  }
+}
