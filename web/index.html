@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Oneida County 911 Activity Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; }
+    #map { height: calc(100vh - 64px); width: 100%; }
+    header { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: #1c2330; color: #e8ecf3; flex-wrap: wrap; }
+    header h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 600; }
+    header label { font-size: 13px; color: #aab4c5; }
+    input[type=date] { padding: 4px 6px; border-radius: 4px; border: 1px solid #3a4555; background: #232b3a; color: #e8ecf3; }
+    button { padding: 5px 12px; border-radius: 4px; border: none; background: #3d7eff; color: white; cursor: pointer; font-size: 13px; }
+    #status { font-size: 13px; color: #aab4c5; min-width: 90px; }
+    .credit { font-size: 11px; color: #7d8aa0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Oneida County, NY — 911 activity heatmap</h1>
+    <label>From <input type="date" id="since" /></label>
+    <label>To <input type="date" id="until" /></label>
+    <button id="update">Update map</button>
+    <span id="status"></span>
+    <span class="credit">Data: oneidacountyny.gov public feed · open source</span>
+  </header>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+  <script src="./config.js"></script>
+  <script>
+    const map = L.map('map').setView([43.2, -75.6], 10);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+      maxZoom: 18,
+    }).addTo(map);
+
+    let heatLayer = null;
+
+    function daysAgo(n) {
+      const d = new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+      return d.toISOString().slice(0, 10);
+    }
+    document.getElementById('since').value = daysAgo(30);
+    document.getElementById('until').value = daysAgo(0);
+
+    async function update() {
+      const statusEl = document.getElementById('status');
+      const since = document.getElementById('since').value || undefined;
+      const until = document.getElementById('until').value || undefined;
+      const params = new URLSearchParams();
+      if (since) params.set('since', since);
+      if (until) params.set('until', until);
+      statusEl.textContent = 'loading…';
+      try {
+        const res = await fetch(`${API_URL}?${params.toString()}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const geo = await res.json();
+        const points = geo.features.map((f) => [f.geometry.coordinates[1], f.geometry.coordinates[0]]);
+        if (heatLayer) map.removeLayer(heatLayer);
+        heatLayer = L.heatLayer(points, { radius: 22, blur: 18, maxZoom: 14 }).addTo(map);
+        statusEl.textContent = `${geo.features.length} incidents`;
+        if (points.length) {
+          const lats = points.map((p) => p[0]);
+          const lngs = points.map((p) => p[1]);
+          map.fitBounds(L.latLngBounds([Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]).pad(0.15));
+        }
+      } catch (err) {
+        statusEl.textContent = `error: ${err.message}`;
+      }
+    }
+
+    document.getElementById('update').addEventListener('click', update);
+    update();
+  </script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+.git/
+.github/
+docs/
+test/
+scripts/
+infra/
+node_modules/
+.env
+.env.example
+Dockerfile
+docker-compose.yml
+functions/local.settings.json
+*.md
