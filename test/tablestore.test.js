@@ -71,17 +71,31 @@ function makeFakeBackstore() {
         stamp(merged);
         t.set(key, merged);
       },
-      async deleteEntity({ partitionKey, rowKey }) {
-        table(name).delete(`${partitionKey}\u0000${rowKey}`);
+      async deleteEntity({ partitionKey, rowKey }, etag) {
+        const t = table(name);
+        const key = `${partitionKey}\u0000${rowKey}`;
+        if (etag != null && t.get(key)?._etag !== etag) throw new FakeConflictError();
+        t.delete(key);
       },
       async queryEntities({ queryOptions = {}, continuationToken } = {}) {
         let out = [...table(name).values()];
         for (const clause of String(queryOptions.filter ?? '').split(' and ')) {
-          const m = clause.trim().match(/^(\w+) eq '(.*)'$/);
-          if (m) {
-            const [col, val] = [m[1], m[2].replace(/''/g, "'")];
-            out = out.filter((e) => String(e[col]) === val);
-          }
+          const m = clause.trim().match(/^(\w+) (eq|ge|gt|le|lt) '(.*)'$/);
+          if (!m) continue;
+          const [, col, op, rawVal] = m;
+          const val = rawVal.replace(/''/g, "'");
+          out = out.filter((e) => {
+            const a = e[col];
+            if (a == null) return false; // OData semantics: absent column fails any comparison
+            switch (op) {
+              case 'eq': return String(a) === val;
+              case 'ne': return String(a) !== val;
+              case 'ge': return String(a) >= val;
+              case 'gt': return String(a) > val;
+              case 'le': return String(a) <= val;
+              case 'lt': return String(a) < val;
+            }
+          });
         }
         const top = queryOptions.top ?? 1000;
         const start = Number(continuationToken ?? 0);
@@ -250,4 +264,25 @@ test('recordTickSuccess writes last_poll and resets error counter', async () => 
   assert.equal(row.fetched, 5);
   assert.equal(row.added, 2);
   assert.equal(row.errors, 0);
+});
+
+test('fetchRange applies day-granular since/until inside month partitions', async () => {
+  const bs = makeFakeBackstore();
+  const clients = clientsFrom(bs);
+  await upsertIncidents(
+    clients,
+    [incident({ dedupKey: 'ID:51', dateFirstIso: '2026-03-05T10:00:00.000Z' })],
+    '2026-03-05T10:00:00.000Z'
+  );
+  await upsertIncidents(
+    clients,
+    [incident({ dedupKey: 'ID:52', dateFirstIso: '2026-03-18T10:00:00.000Z' })],
+    '2026-03-18T10:00:00.000Z'
+  );
+  // March 10..19 window must include only ID:52 (both rows share the 2026-03 partition).
+  const geo = await fetchRange(clients, {
+    since: new Date('2026-03-10'),
+    until: new Date('2026-03-19'),
+  });
+  assert.deepEqual(geo.features.map((f) => f.properties.dedupKey), ['ID:52']);
 });

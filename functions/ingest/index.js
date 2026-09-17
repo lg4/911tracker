@@ -8,8 +8,9 @@ import {
   recordTickFailure,
 } from '../../src/store/tableStore.js';
 
-// Lease TTL must exceed host.json functionTimeout (5 min) so a running tick can never be
-// displaced mid-run by another instance taking over an expired lock.
+// Lease TTL must exceed the function timeout (set via the FUNCTION_TIMEOUT app setting,
+// 10 min in production) so a running tick can never be displaced mid-run by another
+// instance taking over an expired lock.
 const LEASE_TTL_MS = 15 * 60 * 1000;
 const JITTER_MAX_MS = 45_000;
 
@@ -18,11 +19,13 @@ function sleep(ms) {
 }
 
 export default async function (context) {
-  const clients = createTableClients(
-    process.env.AZURE_TABLES_CONNECTION_STRING || process.env.AzureWebJobsStorage
-  );
+  let clients = null;
   let holder = null;
   try {
+    const cs = process.env.AZURE_TABLES_CONNECTION_STRING || process.env.AzureWebJobsStorage;
+    if (!cs) throw new Error('missing tables connection string (AZURE_TABLES_CONNECTION_STRING / AzureWebJobsStorage)');
+    clients = createTableClients(cs);
+
     holder = await acquireLease(clients, LEASE_TTL_MS);
     if (!holder) {
       context.log('lease held by another instance; skipping tick');
@@ -34,7 +37,7 @@ export default async function (context) {
 
     const nowIso = new Date().toISOString();
     const { incidents, source, skipped, warnings } = await runPoll({ checkHtml: false });
-    const { added } = await upsertIncidents(clients, incidents, nowIso);
+    const { added } = await upsertIncidents(clients, incidents, nowIso, { budgetMs: 8 * 60 * 1000 });
 
     context.log(JSON.stringify({ ts: nowIso, source, fetched: incidents.length, added, skipped, warnings }));
     await recordTickSuccess(clients, { ts: nowIso, source, fetched: incidents.length, added, skipped, warnings });

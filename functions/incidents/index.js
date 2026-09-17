@@ -23,6 +23,11 @@ export default async function (context) {
     if (!Number.isFinite(sinceIso.getTime()) || !Number.isFinite(untilIso.getTime())) throw new Error('bad date');
     if ((q.since && !DATE_RE.test(q.since)) || (q.until && !DATE_RE.test(q.until))) throw new Error('bad format');
     if (sinceIso > untilIso) throw new Error('since after until');
+    let limit;
+    if (q.limit != null) {
+      limit = Number(q.limit);
+      if (!Number.isInteger(limit) || limit <= 0) throw new Error('limit must be a positive integer');
+    }
   } catch (err) {
     context.res = { status: 400, body: { message: `invalid params: ${err.message}` }, headers: corsHeaders() };
     return;
@@ -37,7 +42,7 @@ export default async function (context) {
       until: untilIso,
       type: q.type || undefined,
       status: q.status || undefined,
-      limit: q.limit ? Number(q.limit) : undefined,
+      limit,
     });
     context.res = { status: 200, body: geojson, headers: corsHeaders() };
   } catch (err) {

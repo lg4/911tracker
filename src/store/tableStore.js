@@ -76,15 +76,19 @@ async function getRow(client, partitionKey, rowKey) {
   }
 }
 
-// Locate an incident's original (pinned-partition) row. The feed only reports the current
-// month, so on a rare month-boundary crossing we walk back through prior months probing by
-// PK+RK until found or exhausted.
-async function findOriginal(clients, dedupKey, currentMonth) {
-  let m = new Date(`${currentMonth}-01T00:00:00Z`);
+// Locate an incident's original (pinned-partition) row. The feed only reports current-month
+// rows, so the incident's own dateFirst tells us where its original lives: probe that month
+// first, then walk back through prior months (rare rollover case) until found or exhausted.
+async function findOriginal(clients, dedupKey, anchorMonth, deadlineMs) {
+  let m = new Date(`${anchorMonth}-01T00:00:00Z`);
   for (let i = 0; i < MAX_LOOKBACK_MONTHS; i++) {
+    if (Date.now() > deadlineMs) break;
     const part = m.toISOString().slice(0, 7);
     const row = await getRow(clients.incidents, part, dedupKey);
     if (row) return row;
+    // Stop early once we walk past any plausible data start point is unnecessary here;
+    // unknown incidents cost exactly one probe and exit via the loop below.
+    if (i >= 1) break; // originals live at most in the month before the current one
     m.setUTCMonth(m.getUTCMonth() - 1);
   }
   return null;
@@ -97,11 +101,17 @@ function upsertReplace(client, entity) {
 // Upsert every incident with Phase-1 semantics: first-seen timestamp kept, poll count
 // bumped per tick, status_history appended only when observed status changes, and the
 // never-move rollover rule (dual-write into the new month partition, keep original).
-export async function upsertIncidents(clients, incidents, nowIso) {
+// A wall-clock budget keeps a bad tick from blowing through functionTimeout; aborting is
+// safe because the next tick re-runs everything idempotently.
+export async function upsertIncidents(clients, incidents, nowIso, opts = {}) {
+  const deadlineMs = Date.now() + (opts.budgetMs ?? 4 * 60 * 1000);
   let added = 0;
   for (const inc of incidents) {
+    if (Date.now() > deadlineMs) {
+      throw new Error(`upsert budget exhausted after ${added}/${incidents.length} incidents`);
+    }
     const curMonth = monthOf(inc.dateFirstIso ?? nowIso);
-    const existing = await findOriginal(clients, inc.dedupKey, curMonth);
+    const existing = await findOriginal(clients, inc.dedupKey, curMonth, deadlineMs);
 
     const pinnedPartition = existing ? existing.originPartition || existing.partitionKey : curMonth;
     const firstSeenAt = existing?.firstSeenAt ?? nowIso;
@@ -132,7 +142,7 @@ export async function upsertIncidents(clients, incidents, nowIso) {
     if (statusChanged && inc.status != null) {
       await upsertReplace(clients.statusHistory, {
         partitionKey: pinnedPartition,
-        rowKey: `${padEpoch(Date.now())}:${sha8(inc.status)}`,
+        rowKey: `${padEpoch(Date.now())}:${sha8(inc.status)}:${Math.random().toString(36).slice(2, 7)}`,
         incidentRowKey: inc.dedupKey,
         observedAt: nowIso,
         status: inc.status,
@@ -155,7 +165,8 @@ function monthRange(sinceIso, untilIso) {
 
 // Read path for the map API. One partition-scoped query per month between since/until,
 // following continuation tokens; duplicates from rollover dual-writes are collapsed by
-// rowKey keeping the newest lastSeenAt.
+// rowKey keeping the newest lastSeenAt. Day-granular since/until are applied as a
+// dateFirst string-range inside each partition query (rows without dateFirst are excluded).
 export async function fetchRange(clients, opts = {}) {
   const toIso = (d) => (d instanceof Date ? d.toISOString() : d);
   const untilIso = toIso(opts.until ?? new Date());
@@ -163,6 +174,9 @@ export async function fetchRange(clients, opts = {}) {
   const limit = Math.min(Number(opts.limit ?? 2000), 5000);
   const typeFilter = opts.type ? ` and type eq '${opts.type.replace(/'/g, "''")}'` : '';
   const statusFilter = opts.status ? ` and status eq '${opts.status.replace(/'/g, "''")}'` : '';
+  // ISO-8601 UTC strings compare chronologically as plain strings.
+  const dayAfterUntil = new Date(new Date(untilIso).setUTCHours(24)).toISOString();
+  const rangeFilter = ` and dateFirst ge '${sinceIso}' and dateFirst lt '${dayAfterUntil}'`;
 
   const rows = [];
   for (const part of monthRange(sinceIso, untilIso)) {
@@ -170,7 +184,7 @@ export async function fetchRange(clients, opts = {}) {
     do {
       const page = await clients.incidents.queryEntities({
         queryOptions: {
-          filter: `partitionKey eq '${part}'${typeFilter}${statusFilter}`,
+          filter: `partitionKey eq '${part}'${rangeFilter}${typeFilter}${statusFilter}`,
           select: { columns: ['rowKey', 'sourceId', 'title', 'type', 'status', 'location', 'lat', 'lng', 'icon', 'callNumber', 'dateFirst', 'lastSeenAt'] },
           top: rows.length + limit > 1000 ? 1000 : limit,
         },
@@ -253,7 +267,10 @@ export async function releaseLease(clients, holder) {
   if (!holder) return;
   try {
     const current = await getRow(clients.meta, 'meta', 'lock');
-    if (current && current.holder === holder) await clients.meta.deleteEntity({ partitionKey: 'meta', rowKey: 'lock' });
+    // ETag-conditional delete so we can never release a lock another tick took over.
+    if (current && current.holder === holder) {
+      await clients.meta.deleteEntity({ partitionKey: 'meta', rowKey: 'lock' }, current._etag);
+    }
   } catch {
     /* best effort: a crashed holder simply expires via TTL */
   }
