@@ -1,7 +1,9 @@
-# Deploys functions/ (plus its src/ dependencies) to the Azure Function App via
-# OIDC workload identity federation — no secrets in this repo. The managed identity
-# gh-oneida911-deploy (RG oneida911) holds Contributor on the resource group; see
-# docs/runbook.md for setup details.
+# Deploys functions/ (plus its src/ dependencies) to the Azure Function App.
+# Auth: service principal oneida911-gh-deploy (Contributor on RG oneida911), via
+# AZURE_CLIENT_ID/AZURE_TENANT_ID/AZURE_SUBSCRIPTION_ID vars + AZURE_CLIENT_SECRET
+# secret. A user-assigned MI (gh-oneida911-deploy) with federated credentials for
+# this repo already exists in the RG; flip back to pure OIDC once its app
+# registration syncs into Microsoft Graph (see docs/runbook.md).
 name: deploy-functions
 
 on:
@@ -51,12 +53,13 @@ jobs:
         working-directory: dist
         run: npm ci
 
-      - name: Log in to Azure (OIDC)
+      - name: Log in to Azure
         uses: azure/login@v3
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
 
       - name: Deploy to Function App
         uses: Azure/functions-action@v1
