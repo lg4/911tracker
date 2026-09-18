@@ -25,6 +25,7 @@ jobs:
       - name: Deploy to Static Web App
         uses: azure/static-web-apps-deploy@v1
         with:
+          action: 'Publish'
           action_api_token: ${{ secrets.AZURE_SWA_API_TOKEN }}
           app_location: 'web'
           api_location: ''
