@@ -1,0 +1,31 @@
+# Deploys web/ to the Static Web App. Auth is via the SWA api key secret
+# (AZURE_SWA_API_TOKEN, from `terraform output static_site_api_key`); no Azure
+# login needed for this job.
+name: deploy-web
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      # Point the map at the deployed incidents function before uploading.
+      - name: Bake API URL
+        run: sed -i "s|REPLACE-WITH-FUNCTION-APP|${{ vars.FUNCTION_APP_NAME }}|" web/config.js
+
+      - name: Deploy to Static Web App
+        uses: azure/static-web-apps-deploy@v1
+        with:
+          action_api_token: ${{ secrets.AZURE_SWA_API_TOKEN }}
+          app_location: 'web'
+          api_location: ''
+          output_location: ''
