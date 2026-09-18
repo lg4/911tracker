@@ -29,4 +29,4 @@ jobs:
       - name: Deploy to Static Web App
         env:
           SWA_CLI_DEPLOYMENT_TOKEN: ${{ secrets.AZURE_SWA_API_TOKEN }}
-        run: npx --yes @azure/static-web-apps-cli@latest deploy web --env production
+        run: npx --yes @azure/static-web-apps-cli@latest deploy --app-location web --output-location web --env production
