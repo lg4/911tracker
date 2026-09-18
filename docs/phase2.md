@@ -157,3 +157,39 @@ dev loop stays `npm test` (Azurite via npx) — no Azure login needed for unit w
 - Politeness preserved: same ~10-min cadence, jitter, honest User-Agent as Phase 1.
 - Timer triggers require the standalone Functions app (SWA managed functions are
   HTTP-only) — that is exactly what we're using, so no constraint hit.
+
+## M5 deployment state (live on Azure, Terraform-managed in `infra/`)
+
+All resources deployed; state lives in `infra/.terraform` (uncommitted).
+
+| Resource | Name | Region | Notes |
+|---|---|---|---|
+| Resource group | `oneida911` | eastus | |
+| Storage account | `o911tse10tr1` | eastus | tables endpoint `https://o911tse10tr1.table.core.windows.net`; tables `incidents`, `statusHistory`, `meta` created via `scripts/create-tables.js` |
+| Function App | `o911func-e10tr1` | eastus | Linux consumption Y1, node ~4; app settings: `FUNCTIONS_WORKER_RUNTIME=node`, `AZURE_TABLES_CONNECTION_STRING` (raw primary connection string — `createTableClients` parses it), `ALLOWED_ORIGIN=https://o911map-e10tr1.azurestaticapps.net` |
+| Static Web App | `o911map-e10tr1` | **eastus2** | SWA is unavailable in eastus; Free tier. Deployment token = terraform output `static_site_api_key` (= Azure `properties.apiKey`), stored as GH secret `AZURE_SWA_API_TOKEN` |
+
+Data seeded: 355 incidents from local Postgres (`scripts/seed-to-tables.js`).
+
+### GitHub Actions deploys
+
+- `deploy-functions.yml`: stages a bundle (`functions/*` + referenced `src/**` files + package manifests) into `dist/`, `npm ci`, then `Azure/functions-action@v1` with `package=dist`. Auth: service principal `oneida911-gh-deploy` (Contributor on the RG) via `azure/login@v3` `auth-type: service-principal` (GH secrets `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID`/`AZURE_CLIENT_SECRET`; var `FUNCTION_APP_NAME`). A managed identity `gh-oneida911-deploy` exists with federated credentials for a future OIDC migration, but its app object was not synced to Graph and OIDC failed with AADSTS70025 — SP auth is the working path today.
+- `deploy-web.yml`: seds `REPLACE-WITH-FUNCTION-APP` in `web/config.js`, then deploys with the SWA CLI (`npx @azure/static-web-apps-cli deploy web --env production`) using `SWA_CLI_DEPLOYMENT_TOKEN`. The `azure/static-web-apps-deploy@v1` action has a server-side "deployment_action was not provided" bug for api-token publishes; do not switch back without re-testing.
+
+### Known pitfalls learned the hard way
+
+- `azurerm_function_app` / `azurerm_static_site` are deprecated in provider 4.x — use `azurerm_linux_function_app` (needs `service_plan_id`, `functions_extension_version`, empty `site_config {}`) and `azurerm_static_web_app` (has computed `api_key`; add `ignore_changes = [repository_branch, repository_url]` since token deploys mutate those).
+- `@azure/data-tables` v13 API: `getEntity(partitionKey, rowKey)` and `deleteEntity(pk, rk, {etag})` take positional identifiers; there is no `queryEntities` or `replaceEntity` — use `listEntities({queryOptions:{filter}})` (paged iterator) and `updateEntity(entity,'Replace',{etag})`. Reads expose `.etag` (not `_etag`).
+- OData filters must address the case-sensitive system columns `PartitionKey`/`RowKey`; custom props keep their casing (`dateFirst ge '...'`). No `$select` in `fetchRange` — partitions are tiny and full entities avoid case-normalization divergence between service and test fakes.
+- Azurite rejects underscored table names → Azure tables are `incidents`/`statusHistory`/`meta` (Postgres keeps `incident_status_history`).
+- The JS SDK does not accept .NET-style semicolon connection strings directly; `createTableClients` parses them into endpoint + `AzureNamedKeyCredential` (the ESM export name — `TablesSharedKeyCredential` is not exported).
+- Unit-test fakes model the exact v13 call shapes (including dual-cased key storage); `test/tablestore.azurite.test.js` runs the real SDK against a spawned Azurite (TLS via self-signed cert, test-only relaxed validation) so fake drift cannot hide again.
+
+### Outstanding at session handoff
+
+- [ ] Confirm last deploy-functions run green after `auth-type: service-principal` fix
+- [ ] SWA CLI reported "deployment_token provided was invalid" though token matches live `properties.apiKey` — re-trigger web deploy; if still failing, run the CLI locally with the token to capture the real error
+- [ ] Verify timer ingest tick lands rows + `meta.last_poll` advances (check `meta` table / function logs)
+- [ ] Curl `https://o911func-e10tr1.azurewebsites.net/api/incidents?since=...` for GeoJSON + CORS headers
+- [ ] Browser-check the deployed map end-to-end
+- [ ] Ops runbook section; retire local Postgres path (drop `pg`, stop docker db/ingest containers)
