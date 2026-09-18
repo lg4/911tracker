@@ -22,11 +22,11 @@ jobs:
       - name: Bake API URL
         run: sed -i "s|REPLACE-WITH-FUNCTION-APP|${{ vars.FUNCTION_APP_NAME }}|" web/config.js
 
+      # The azure/static-web-apps-deploy action's container has a known bug where
+      # api-token "Publish" deployments fail server-side ("deployment_action was not
+      # provided"); the SWA CLI is the supported CI path instead. AZURE_SWA_API_TOKEN
+      # is properties.apiKey of the site (= deployment token).
       - name: Deploy to Static Web App
-        uses: azure/static-web-apps-deploy@v1
-        with:
-          action: 'Publish'
-          action_api_token: ${{ secrets.AZURE_SWA_API_TOKEN }}
-          app_location: 'web'
-          api_location: ''
-          output_location: ''
+        env:
+          SWA_CLI_DEPLOYMENT_TOKEN: ${{ secrets.AZURE_SWA_API_TOKEN }}
+        run: npx --yes @azure/static-web-apps-cli@latest deploy web --env production

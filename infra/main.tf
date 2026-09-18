@@ -68,6 +68,12 @@ resource "azurerm_static_web_app" "web" {
   location            = var.swa_location
   sku_tier            = "Free"
   sku_size            = "Free"
+
+  # Deployments go through the SWA CLI with the api key, which mutates these in
+  # Azure without any Terraform change (see provider docs).
+  lifecycle {
+    ignore_changes = [repository_branch, repository_url]
+  }
 }
 
 output "static_site_url" {
