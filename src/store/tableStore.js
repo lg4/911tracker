@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { TableClient } from '@azure/data-tables';
+import { TableClient, AzureNamedKeyCredential } from '@azure/data-tables';
 
 // Keep serialized raw payloads far under the 1 MiB entity limit.
 const RAW_MAX_CHARS = 256_000;
@@ -8,13 +8,30 @@ const RAW_MAX_CHARS = 256_000;
 // Only hit on first sight after a long gap; each probe is one cheap PK+RK lookup.
 const MAX_LOOKBACK_MONTHS = 36;
 
-export function createTableClients(connectionString) {
+// @azure/data-tables takes an endpoint URL plus optional credential — not .NET-style
+// semicolon connection strings. Accept both so callers can pass either a bare dev
+// endpoint (Azurite) or the full Azure connection string from app settings.
+function parseConnectionString(cs) {
+  if (!cs.includes(';')) return { url: cs };
+  const parts = {};
+  for (const seg of cs.split(';')) {
+    const eq = seg.indexOf('=');
+    if (eq > 0) parts[seg.slice(0, eq).toLowerCase()] = seg.slice(eq + 1);
+  }
+  const account = parts.accountname;
+  const key = parts.accountkey;
+  if (!account || !key) throw new Error('connection string missing AccountName/AccountKey');
+  const proto = (parts.defaultendpointprotocol ?? 'https').replace(/[^a-z]/gi, '') || 'https';
+  return { url: `${proto}://${account}.table.core.windows.net`, credential: new AzureNamedKeyCredential(account, key) };
+}
+
+export function createTableClients(connectionString, opts = {}) {
   if (!connectionString) throw new Error('missing Azure tables connection string');
-  return {
-    incidents: new TableClient(connectionString, 'incidents'),
-    statusHistory: new TableClient(connectionString, 'status_history'),
-    meta: new TableClient(connectionString, 'meta'),
-  };
+  const { url } = parseConnectionString(connectionString);
+  // Bare dev endpoints (Azurite) carry no key; pass a credential explicitly in that case.
+  const credential = opts.credential ?? parseConnectionString(connectionString).credential;
+  const make = (name) => (credential ? new TableClient(url, name, credential) : new TableClient(url, name));
+  return { incidents: make('incidents'), statusHistory: make('statusHistory'), meta: make('meta') };
 }
 
 export function monthOf(iso) {
@@ -69,7 +86,7 @@ function toEntity(inc, { partitionKey, firstSeenAt, pollCount, originPartition }
 
 async function getRow(client, partitionKey, rowKey) {
   try {
-    return await client.getEntity({ partitionKey, rowKey });
+    return await client.getEntity(partitionKey, rowKey);
   } catch (err) {
     if (err.statusCode === 404 || /not found/i.test(err.message)) return null;
     throw err;
@@ -179,21 +196,21 @@ export async function fetchRange(clients, opts = {}) {
   const rangeFilter = ` and dateFirst ge '${sinceIso}' and dateFirst lt '${dayAfterUntil}'`;
 
   const rows = [];
-  for (const part of monthRange(sinceIso, untilIso)) {
-    let token;
-    do {
-      const page = await clients.incidents.queryEntities({
-        queryOptions: {
-          filter: `partitionKey eq '${part}'${rangeFilter}${typeFilter}${statusFilter}`,
-          select: { columns: ['rowKey', 'sourceId', 'title', 'type', 'status', 'location', 'lat', 'lng', 'icon', 'callNumber', 'dateFirst', 'lastSeenAt'] },
-          top: rows.length + limit > 1000 ? 1000 : limit,
-        },
-        continuationToken: token,
-      });
-      rows.push(...page.items.filter((i) => i.partitionKey === part));
-      token = page.continuationToken;
-    } while (token && rows.length < limit);
-    if (rows.length >= limit) break;
+  outer: for (const part of monthRange(sinceIso, untilIso)) {
+    // The SDK maps entity partitionKey/rowKey onto the system columns PartitionKey/RowKey,
+    // so filters must address those names. No $select: partitions are tiny, full entities
+    // keep the read path free of case-sensitivity surprises.
+    for await (const e of clients.incidents.listEntities({
+      queryOptions: {
+        // System key columns are case-sensitive (PartitionKey); custom props keep their casing.
+        // No $select: partitions hold tens of rows at most, and full entities sidestep any
+        // client-side case normalization differences between the service and test fakes.
+        filter: `PartitionKey eq '${part}'${rangeFilter}${typeFilter}${statusFilter}`,
+      },
+    })) {
+      if (e.partitionKey === part) rows.push(e);
+      if (rows.length >= limit) break outer;
+    }
   }
 
   const byRowKey = new Map();
@@ -249,9 +266,10 @@ export async function acquireLease(clients, ttlMs = 15 * 60 * 1000, maxAttempts 
       if (!current) continue; // deleted between read attempts; retry fresh insert
       if (new Date(current.expiresAt).getTime() >= Date.now()) return null; // live lock
       try {
-        await clients.meta.replaceEntity(
+        await clients.meta.updateEntity(
           { partitionKey: 'meta', rowKey: 'lock', holder, expiresAt: new Date(Date.now() + ttlMs).toISOString() },
-          current._etag
+          'Replace',
+          { etag: current.etag }
         );
         return holder;
       } catch {
@@ -269,7 +287,7 @@ export async function releaseLease(clients, holder) {
     const current = await getRow(clients.meta, 'meta', 'lock');
     // ETag-conditional delete so we can never release a lock another tick took over.
     if (current && current.holder === holder) {
-      await clients.meta.deleteEntity({ partitionKey: 'meta', rowKey: 'lock' }, current._etag);
+      await clients.meta.deleteEntity('meta', 'lock', { etag: current.etag });
     }
   } catch {
     /* best effort: a crashed holder simply expires via TTL */

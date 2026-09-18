@@ -49,11 +49,11 @@ to the `YYYY-MM` of its `dateFirst` at first sight. If `dateFirst` later crosses
 month boundary, upsert a duplicate entity into the new partition (denormalized dual
 write) and keep the original row untouched; reads dedupe duplicates by `rowKey`,
 keeping the entry with the newest `lastSeenAt`. This avoids cross-partition deletes
-entirely (Table Storage has no cross-partition transactions), keeps `status_history`
+entirely (Table Storage has no cross-partition transactions), keeps `statusHistory`
 rows consistent with their parent's pinned partition, and costs at most one extra
 entity per rare boundary crossing.
 
-### `status_history` (append-only)
+### `statusHistory` (append-only)
 
 | Column | Value |
 |---|---|

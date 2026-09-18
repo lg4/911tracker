@@ -45,9 +45,9 @@ resource "azurerm_linux_function_app" "app" {
   site_config {}
 
   app_settings = {
-    FUNCTIONS_WORKER_RUNTIME         = "node"
-    AZURE_TABLES_CONNECTION_STRING   = azurerm_storage_account.tables.primary_connection_string
-    ALLOWED_ORIGIN                   = "https://${local.static_site_name}.azurestaticapps.net"
+    FUNCTIONS_WORKER_RUNTIME       = "node"
+    AZURE_TABLES_CONNECTION_STRING = azurerm_storage_account.tables.primary_connection_string
+    ALLOWED_ORIGIN                 = "https://${local.static_site_name}.azurestaticapps.net"
   }
 }
 

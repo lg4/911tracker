@@ -38,46 +38,61 @@ function makeFakeBackstore() {
   }
 
   function clientFor(name) {
+    // Mirrors the @azure/data-tables v13 API surface exactly (positional identifiers,
+    // listEntities paged iterator, etag option objects) so unit tests can't drift from
+    // what production calls. Like the real service, JS-level partitionKey/rowKey are ALSO
+    // stored under the case-sensitive system columns PartitionKey/RowKey (kept alongside),
+    // so OData filters on the system names match while lowercase assertions still hold.
+    const sysCols = (e) => {
+      const out = { ...e };
+      if (out.partitionKey != null) out.PartitionKey = out.partitionKey;
+      if (out.rowKey != null) out.RowKey = out.rowKey;
+      return out;
+    };
+    const keyOf = (e) => `${e.partitionKey ?? e.PartitionKey}\u0000${e.rowKey ?? e.RowKey}`;
     return {
-      async getEntity({ partitionKey, rowKey }) {
+      async getEntity(partitionKey, rowKey) {
         const e = table(name).get(`${partitionKey}\u0000${rowKey}`);
         if (!e) throw new FakeNotFoundError();
         return structuredClone(e);
       },
-      async upsertEntity(entity) {
+      async upsertEntity(entity, mode = 'Merge') {
         const t = table(name);
-        const key = `${entity.partitionKey}\u0000${entity.rowKey}`;
+        const stored = sysCols(entity);
+        const key = keyOf(stored);
         const existing = t.get(key);
-        const merged = existing ? { ...existing, ...entity } : { ...entity };
-        delete merged._etag;
+        const merged = mode === 'Replace' ? stored : existing ? { ...existing, ...stored } : stored;
+        delete merged.etag;
         stamp(merged);
         t.set(key, merged);
       },
       async createEntity(entity) {
         const t = table(name);
-        const key = `${entity.partitionKey}\u0000${entity.rowKey}`;
+        const stored = sysCols(entity);
+        const key = keyOf(stored);
         if (t.has(key)) throw new FakeConflictError();
-        const stored = { ...entity };
         stamp(stored);
         t.set(key, stored);
       },
-      async replaceEntity(entity, etag) {
+      async updateEntity(entity, mode = 'Merge', options = {}) {
         const t = table(name);
-        const key = `${entity.partitionKey}\u0000${entity.rowKey}`;
+        const stored = sysCols(entity);
+        const key = keyOf(stored);
         const existing = t.get(key);
-        if (!existing || existing._etag !== etag) throw new FakeConflictError();
-        const merged = { ...existing, ...entity };
-        delete merged._etag;
+        if (!existing && mode === 'Replace') throw new FakeNotFoundError();
+        if (options.etag != null && options.etag !== '*' && existing?.etag !== options.etag) throw new FakeConflictError();
+        const merged = mode === 'Replace' ? stored : { ...existing, ...stored };
+        delete merged.etag;
         stamp(merged);
         t.set(key, merged);
       },
-      async deleteEntity({ partitionKey, rowKey }, etag) {
+      async deleteEntity(partitionKey, rowKey, options = {}) {
         const t = table(name);
         const key = `${partitionKey}\u0000${rowKey}`;
-        if (etag != null && t.get(key)?._etag !== etag) throw new FakeConflictError();
+        if (options.etag != null && options.etag !== '*' && t.get(key)?.etag !== options.etag) throw new FakeConflictError();
         t.delete(key);
       },
-      async queryEntities({ queryOptions = {}, continuationToken } = {}) {
+      *listEntities({ queryOptions = {} } = {}) {
         let out = [...table(name).values()];
         for (const clause of String(queryOptions.filter ?? '').split(' and ')) {
           const m = clause.trim().match(/^(\w+) (eq|ge|gt|le|lt) '(.*)'$/);
@@ -97,13 +112,8 @@ function makeFakeBackstore() {
             }
           });
         }
-        const top = queryOptions.top ?? 1000;
-        const start = Number(continuationToken ?? 0);
-        const page = out.slice(start, start + top);
-        return {
-          items: structuredClone(page),
-          continuationToken: start + top < out.length ? String(start + top) : undefined,
-        };
+        const select = queryOptions.select;
+        for (const e of out) yield structuredClone(Array.isArray(select) ? Object.fromEntries(Object.entries(e).filter(([k]) => select.includes(k))) : e);
       },
     };
   }
