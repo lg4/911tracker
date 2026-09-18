@@ -54,13 +54,15 @@ jobs:
         run: npm ci
 
       - name: Log in to Azure
-        uses: azure/login@v3
-        with:
-          auth-type: SERVICE_PRINCIPAL
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        # Plain az CLI login: the azure/login action kept forcing the OIDC/federated path
+        # regardless of auth-type; explicit service-principal login removes that ambiguity.
+      - name: Log in to Azure
+        run: |
+          az login --service-principal \
+            -u "${{ vars.AZURE_CLIENT_ID }}" \
+            -p "${{ secrets.AZURE_CLIENT_SECRET }}" \
+            --tenant "${{ vars.AZURE_TENANT_ID }}"
+          az account set --subscription "${{ vars.AZURE_SUBSCRIPTION_ID }}"
 
       - name: Deploy to Function App
         uses: Azure/functions-action@v1
