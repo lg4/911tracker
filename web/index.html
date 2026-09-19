@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Oneida County 911 Activity Map</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="vendor/leaflet.css" />
   <style>
     body { margin: 0; font-family: system-ui, sans-serif; }
     #map { height: calc(100vh - 64px); width: 100%; }
@@ -28,14 +28,30 @@
   </header>
   <div id="map"></div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+  <script src="vendor/leaflet.js"></script>
+  <script src="vendor/leaflet-heat.js"></script>
   <script src="./config.js"></script>
   <script>
-    const map = L.map('map').setView([43.2, -75.6], 10);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-      maxZoom: 18,
+    // Central-NY focus box; the app is fully self-contained (local vendored
+    // Leaflet + locally stored basemap tiles) so no external tile/CDN calls.
+    const BOUNDS = [[42.8, -76.6], [43.6, -75.0]];
+    const CENTER = [(BOUNDS[0][0] + BOUNDS[1][0]) / 2, (BOUNDS[0][1] + BOUNDS[1][1]) / 2];
+
+    const map = L.map('map', {
+      maxBounds: BOUNDS,
+      maxBoundsViscosity: 1.0,
+      worldCopyJump: false,
+      minZoom: 7,
+      maxZoom: 14,
+    }).setView(CENTER, 10);
+
+    L.tileLayer('/tiles/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &copy; CARTO',
+      minZoom: 7,
+      maxNativeZoom: 12,
+      maxZoom: 14,
+      bounds: BOUNDS,
+      noWrap: true,
     }).addTo(map);
 
     let heatLayer = null;
