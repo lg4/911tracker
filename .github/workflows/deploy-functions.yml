@@ -44,7 +44,10 @@ jobs:
         run: |
           mkdir -p dist/functions dist/src/ingest dist/src/store
           cp -r functions/* dist/functions/
-          rm -f dist/functions/local.settings.example.json
+          # Run-from-package bundles require host.json at the package ROOT (the
+          # nested copy does not satisfy the runtime's scan).
+          rm -f dist/functions/local.settings.example.json dist/functions/host.json
+          cp functions/host.json dist/
           cp package.json package-lock.json dist/
           cp src/config.js dist/src/
           cp src/ingest/fetchSource.js src/ingest/parse.js dist/src/ingest/
