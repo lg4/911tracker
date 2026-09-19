@@ -56,10 +56,14 @@ jobs:
       - name: Log in to Azure
         # Plain az CLI login: the azure/login action kept forcing the OIDC/federated path
         # regardless of auth-type; explicit service-principal login removes that ambiguity.
+        # Secret goes through an env var — inline ${{ secrets.* }} expansion breaks if the
+        # password contains shell-special characters.
+        env:
+          AZURE_SP_PASSWORD: ${{ secrets.AZURE_CLIENT_SECRET }}
         run: |
           az login --service-principal \
             -u "${{ vars.AZURE_CLIENT_ID }}" \
-            -p "${{ secrets.AZURE_CLIENT_SECRET }}" \
+            -p "$AZURE_SP_PASSWORD" \
             --tenant "${{ vars.AZURE_TENANT_ID }}"
           az account set --subscription "${{ vars.AZURE_SUBSCRIPTION_ID }}"
 
