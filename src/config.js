@@ -23,11 +23,6 @@ export const config = {
   // Plausible bounding box for Oneida County. Records outside are treated as bad data.
   bbox: { latMin: 43.0, latMax: 43.5, lngMin: -75.9, lngMax: -75.0 },
 
-  databaseUrl:
-    process.env.DATABASE_URL ||
-    'postgres://oneida:oneida@localhost:5432/oneida911',
-
-  runIngest: (process.env.RUN_INGEST ?? 'true') !== 'false',
 
   // HTTP timeout per request.
   fetchTimeoutMs: Number(process.env.FETCH_TIMEOUT_MS || 30000),
