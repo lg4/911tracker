@@ -1,3 +1,7 @@
+// Node v4 programming model (@azure/functions): registers triggers programmatically
+// and supports ES module imports of shared src/ modules — the legacy function.json
+// layout does not on node ~4.
+import { app } from '@azure/functions';
 import { createTableClients, fetchRange } from '../../src/store/tableStore.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -7,17 +11,16 @@ function corsHeaders() {
   return { 'Access-Control-Allow-Origin': origin };
 }
 
-export default async function (context) {
-  const req = context.bindings.req;
+async function handler(req, context) {
   if (req.method === 'OPTIONS') {
-    context.res = { status: 204, headers: { ...corsHeaders(), 'Access-Control-Allow-Methods': 'GET', 'Access-Control-Allow-Headers': 'Content-Type' } };
-    return;
+    return { status: 204, headers: { ...corsHeaders(), 'Access-Control-Allow-Methods': 'GET', 'Access-Control-Allow-Headers': 'Content-Type' } };
   }
 
-  const q = req.query ?? {};
-  let sinceIso;
-  let untilIso;
   try {
+    // In v4, req.query is a URLSearchParams, not a plain object.
+    const q = Object.fromEntries(req.query);
+    let sinceIso;
+    let untilIso;
     untilIso = q.until ? new Date(`${q.until}T23:59:59Z`) : new Date();
     sinceIso = q.since ? new Date(`${q.since}T00:00:00Z`) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     if (!Number.isFinite(sinceIso.getTime()) || !Number.isFinite(untilIso.getTime())) throw new Error('bad date');
@@ -28,25 +31,20 @@ export default async function (context) {
       limit = Number(q.limit);
       if (!Number.isInteger(limit) || limit <= 0) throw new Error('limit must be a positive integer');
     }
-  } catch (err) {
-    context.res = { status: 400, body: { message: `invalid params: ${err.message}` }, headers: corsHeaders() };
-    return;
-  }
 
-  try {
-    const clients = createTableClients(
-      process.env.AZURE_TABLES_CONNECTION_STRING || process.env.AzureWebJobsStorage
-    );
-    const geojson = await fetchRange(clients, {
+    const cs = process.env.AZURE_TABLES_CONNECTION_STRING || process.env.AzureWebJobsStorage;
+    const geojson = await fetchRange(createTableClients(cs), {
       since: sinceIso,
       until: untilIso,
       type: q.type || undefined,
       status: q.status || undefined,
       limit,
     });
-    context.res = { status: 200, body: geojson, headers: corsHeaders() };
+    return { status: 200, body: geojson, headers: corsHeaders() };
   } catch (err) {
-    context.error(err);
-    context.res = { status: 503, body: { message: 'table read failed' }, headers: corsHeaders() };
+    context.log(err);
+    return { status: 503, body: { message: 'table read failed' }, headers: corsHeaders() };
   }
 }
+
+app.http('incidents', { methods: ['GET', 'OPTIONS'], handler });

@@ -1,3 +1,7 @@
+// Node v4 programming model (@azure/functions): registers the timer trigger
+// programmatically and supports ES module imports of shared src/ modules — the
+// legacy function.json layout does not on node ~4.
+import { app } from '@azure/functions';
 import { runPoll } from '../../src/ingest/fetchSource.js';
 import {
   createTableClients,
@@ -18,7 +22,7 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-export default async function (context) {
+async function handler(_schedule, context) {
   let clients = null;
   let holder = null;
   try {
@@ -26,6 +30,8 @@ export default async function (context) {
     if (!cs) throw new Error('missing tables connection string (AZURE_TABLES_CONNECTION_STRING / AzureWebJobsStorage)');
     clients = createTableClients(cs);
 
+    // Multi-instance guard: consumption plan may run several instances simultaneously.
+    // Acquire a short-lived lease before polling; skip this tick if another instance holds it.
     holder = await acquireLease(clients, LEASE_TTL_MS);
     if (!holder) {
       context.log('lease held by another instance; skipping tick');
@@ -52,3 +58,5 @@ export default async function (context) {
     await releaseLease(clients, holder);
   }
 }
+
+app.timer('ingest', { schedule: '0 */10 * * * *', handler });

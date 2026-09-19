@@ -37,13 +37,14 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       # The function code imports shared modules from src/, which live outside
-      # functions/. Stage a self-contained bundle mirroring the repo layout so the
-      # relative '../../src/...' imports resolve after deployment.
+      # functions/. Stage a self-contained bundle mirroring the repo layout (incl.
+      # the functions/ dir itself) so the relative '../../src/...' imports and the
+      # package.json "main" entry point both resolve after deployment.
       - name: Stage deployment bundle
         run: |
-          mkdir -p dist/src/ingest dist/src/store
-          cp -r functions/* dist/
-          rm -f dist/local.settings.example.json
+          mkdir -p dist/functions dist/src/ingest dist/src/store
+          cp -r functions/* dist/functions/
+          rm -f dist/functions/local.settings.example.json
           cp package.json package-lock.json dist/
           cp src/config.js dist/src/
           cp src/ingest/fetchSource.js src/ingest/parse.js dist/src/ingest/
