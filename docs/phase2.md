@@ -166,10 +166,12 @@ All resources deployed; state lives in `infra/.terraform` (uncommitted).
 |---|---|---|---|
 | Resource group | `oneida911` | eastus | |
 | Storage account | `o911tse10tr1` | eastus | tables endpoint `https://o911tse10tr1.table.core.windows.net`; tables `incidents`, `statusHistory`, `meta` created via `scripts/create-tables.js` |
-| Function App | `o911func-e10tr1` | eastus | Linux consumption Y1, node ~4; app settings: `FUNCTIONS_WORKER_RUNTIME=node`, `AZURE_TABLES_CONNECTION_STRING` (raw primary connection string — `createTableClients` parses it), `ALLOWED_ORIGIN=https://o911map-e10tr1.azurestaticapps.net` |
-| Static Web App | `o911map-e10tr1` | **eastus2** | SWA is unavailable in eastus; Free tier. Deployment token = terraform output `static_site_api_key` (= Azure `properties.apiKey`), stored as GH secret `AZURE_SWA_API_TOKEN` |
+| Function App | `o911func-e10tr1` | eastus | Linux consumption Y1, node ~4; app settings: `FUNCTIONS_WORKER_RUNTIME=node`, `AZURE_TABLES_CONNECTION_STRING` (raw primary connection string — `createTableClients` parses it), `ALLOWED_ORIGIN=https://salmon-smoke-0f761930f.5.azurestaticapps.net` |
+| Static Web App | `o911map-e10tr1` | **eastus2** | SWA is unavailable in eastus; Free tier. Public URL = default host `https://salmon-smoke-0f761930f.5.azurestaticapps.net`; the name-derived `o911map-e10tr1.azurestaticapps.net` 404s forever here and must not be used for CORS or links. Deployment token = terraform output `static_site_api_key` (= Azure `properties.apiKey`), stored as GH secret `SWA_CLI_DEPLOYMENT_TOKEN` |
 
-Data seeded: 355 incidents from local Postgres (`scripts/seed-to-tables.js`).
+Data seeded: 355 incidents from local Postgres (`scripts/seed-to-tables.js`). The
+Postgres path was retired afterward: local db/ingest containers stopped, `pg` dropped,
+and `functions/ingest` is now the only poller.
 
 ### GitHub Actions deploys
 
@@ -184,12 +186,13 @@ Data seeded: 355 incidents from local Postgres (`scripts/seed-to-tables.js`).
 - Azurite rejects underscored table names → Azure tables are `incidents`/`statusHistory`/`meta` (Postgres keeps `incident_status_history`).
 - The JS SDK does not accept .NET-style semicolon connection strings directly; `createTableClients` parses them into endpoint + `AzureNamedKeyCredential` (the ESM export name — `TablesSharedKeyCredential` is not exported).
 - Unit-test fakes model the exact v13 call shapes (including dual-cased key storage); `test/tablestore.azurite.test.js` runs the real SDK against a spawned Azurite (TLS via self-signed cert, test-only relaxed validation) so fake drift cannot hide again.
+- Functions moved to the **Node v4 programming model** (`@azure/functions`, programmatic `app.http`/`app.timer` registration; entry point = package.json `"main": "functions/index.js"`). ESM imports under legacy `function.json` layouts are not supported on node ~4. Under v4 `req.query` is a `URLSearchParams`. See docs/runbook.md for deploy mechanics and the "malformed content" sync-trigger failure mode (RBAC deploys use WEBSITE_RUN_FROM_PACKAGE; bundle needs `host.json` at its root, and a stuck app requires a manual restart).
 
 ### Outstanding at session handoff
 
-- [ ] Confirm last deploy-functions run green after `auth-type: service-principal` fix
-- [ ] SWA CLI reported "deployment_token provided was invalid" though token matches live `properties.apiKey` — re-trigger web deploy; if still failing, run the CLI locally with the token to capture the real error
-- [ ] Verify timer ingest tick lands rows + `meta.last_poll` advances (check `meta` table / function logs)
-- [ ] Curl `https://o911func-e10tr1.azurewebsites.net/api/incidents?since=...` for GeoJSON + CORS headers
-- [ ] Browser-check the deployed map end-to-end
-- [ ] Ops runbook section; retire local Postgres path (drop `pg`, stop docker db/ingest containers)
+- [x] Web deploy green (`deploy-web` at 547fc47); SWA token issue resolved via GH secret `SWA_CLI_DEPLOYMENT_TOKEN`.
+- [x] Retire local Postgres path (drop `pg`, stop docker db/ingest containers).
+- [x] Ops runbook → docs/runbook.md.
+- [ ] **Blocked:** every `deploy-functions` run since 266ac82 fails sync-trigger with "Function app may have malformed content" even with a verified-correct bundle (root host.json present). Per the error's own remedy, restart `o911func-e10tr1` manually (`az functionapp restart ...` or Portal), then re-dispatch the workflow — suspect the runtime is stuck on a stale WEBSITE_RUN_FROM_PACKAGE value.
+- [ ] Verify timer ingest tick lands rows + `meta.last_poll` advances once functions deploy goes green.
+- [ ] Curl `https://o911func-e10tr1.azurewebsites.net/api/incidents?since=...` for GeoJSON + CORS headers; browser-check the deployed map end-to-end.
