@@ -47,7 +47,9 @@ resource "azurerm_linux_function_app" "app" {
   app_settings = {
     FUNCTIONS_WORKER_RUNTIME       = "node"
     AZURE_TABLES_CONNECTION_STRING = azurerm_storage_account.tables.primary_connection_string
-    ALLOWED_ORIGIN                 = "https://${local.static_site_name}.azurestaticapps.net"
+    # The name-derived <name>.azurestaticapps.net host does not serve content;
+    # default_host_name is the real public URL (see docs/phase2.md M5).
+    ALLOWED_ORIGIN                 = "https://${azurerm_static_web_app.web.default_host_name}"
   }
 }
 
@@ -76,8 +78,10 @@ resource "azurerm_static_web_app" "web" {
   }
 }
 
+# The name-derived host does not serve content; default_host_name is the real
+# public URL (e.g. salmon-smoke-0f761930f.5.azurestaticapps.net).
 output "static_site_url" {
-  value = "https://${local.static_site_name}.azurestaticapps.net"
+  value = "https://${azurerm_static_web_app.web.default_host_name}"
 }
 
 # Deploy token consumed by the GitHub Actions static-web-apps-deploy action.
