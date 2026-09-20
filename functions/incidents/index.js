@@ -40,7 +40,13 @@ async function handler(req, context) {
       status: q.status || undefined,
       limit,
     });
-    return { status: 200, body: geojson, headers: corsHeaders() };
+    // The v4/Kestrel host coerces object bodies via .toString() ("[object Object]")
+    // and defaults Content-Type to text/plain; serialize explicitly + declare JSON.
+    return {
+      status: 200,
+      body: JSON.stringify(geojson),
+      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+    };
   } catch (err) {
     context.log(err);
     return { status: 503, body: { message: 'table read failed' }, headers: corsHeaders() };
