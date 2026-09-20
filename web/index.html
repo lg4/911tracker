@@ -6,8 +6,14 @@
   <title>Oneida County 911 Activity Map</title>
   <link rel="stylesheet" href="vendor/leaflet.css" />
   <style>
-    body { margin: 0; font-family: system-ui, sans-serif; }
-    #map { height: calc(100vh - 64px); width: 100%; }
+    html, body { height: 100%; }
+    body { margin: 0; font-family: system-ui, sans-serif; display: flex; flex-direction: column; }
+    /* Map fills whatever is left after the (wrapping) header, so mobile
+       wraps never clip or overlap the map. */
+    #map { flex: 1; min-height: 0; width: 100%; }
+    /* Panning beyond the local tile pyramid shows this "no coverage" fill
+       instead of a broken white void. */
+    .leaflet-container { background: #d7e3ee; }
     header { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: #1c2330; color: #e8ecf3; flex-wrap: wrap; }
     header h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 600; }
     header label { font-size: 13px; color: #aab4c5; }
@@ -35,15 +41,26 @@
     // Central-NY focus box; the app is fully self-contained (local vendored
     // Leaflet + locally stored basemap tiles) so no external tile/CDN calls.
     const BOUNDS = [[42.8, -76.6], [43.6, -75.0]];
-    const CENTER = [(BOUNDS[0][0] + BOUNDS[1][0]) / 2, (BOUNDS[0][1] + BOUNDS[1][1]) / 2];
 
+    // Partial viscosity resists panning past the covered box mid-drag and lets
+    // a drag briefly peek in from the edge; on release the view settles back in-bounds.
     const map = L.map('map', {
       maxBounds: BOUNDS,
-      maxBoundsViscosity: 1.0,
+      maxBoundsViscosity: 0.5,
       worldCopyJump: false,
       minZoom: 7,
       maxZoom: 14,
-    }).setView(CENTER, 10);
+    });
+    // Start framed exactly on the covered box so the first paint shows only
+    // real basemap (no edge voids); update() re-fits once incidents arrive.
+    map.fitBounds(BOUNDS);
+
+    // Keep Leaflet's internal size in sync when the flex layout changes
+    // (window resize, mobile orientation change, header re-wrapping).
+    function resyncSize() { map.invalidateSize(); }
+    window.addEventListener('resize', resyncSize);
+    window.addEventListener('orientationchange', resyncSize);
+    if ('ResizeObserver' in window) new ResizeObserver(resyncSize).observe(document.getElementById('map'));
 
     L.tileLayer('/tiles/{z}/{x}/{y}.png', {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
