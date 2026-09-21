@@ -107,14 +107,23 @@
       { key: 'ems', label: 'EMS', color: '#2a9d8f' },
       { key: 'other', label: 'Other', color: '#9aa0b4' },
     ];
+    // T14: numeric CAD dispatch codes (06D02-BREATHING PROBLEMS, 31D04-UNCONSCIOUS/FAINTING,
+    // 33C07-TRANSFER, …) all follow the XX[BCD]YY pattern and are EMS responses.
+    const EMS_CODE_RX = /^\d{2}[BCD]\d{2}\b/i;
     const CATEGORY_RX = {
       fire: /\b(FIRE|BURN(?:ING)?|SMOKE|CARBON MONOXIDE|HAZMAT|CHEMICAL|ALARM)\b|MVA-FD/i,
-      ems: /\b(MEDICAL|AMBULANCE|SICK|INJUR\w*|CHEST PAIN|FALL(?:EN)?|OVERDOSE|UNRESPONSIVE|RESPIRAT\w*|CARDIAC|SEIZURE|DIABETIC|BP READ)\b|MVA-MED/i,
-      police: /\b(POLICE|DOMESTIC|TRESPASSING|SUSPICIOUS|MISSING PERSON|CRIMINAL|WELFARE|THEFT|ROBBERY|ASSAULT|FIGHT\b|DISORDERLY|SHOOTING|REPORT\w*|DRUG\S*)\b|\bPD\b|MVA-PD/i,
+      // No bare ASSIST here: it is tested before police and would sink police-support
+      // types ("POLICE ASSIST", "OFFICER ASSIST") into EMS. A standalone "ASSIST" row
+      // falls through to Other — safer than mis-bucketing a support call as EMS.
+      ems: /\b(EMS|MEDICAL|AMBULANCE|TRANSFER|SICK|INJUR\w*|HEART\b|STROKE|LACERATION|HEMORRHAGE|CHEST PAIN|FALL(?:EN)?|OVERDOSE|UNRESPONSIVE|UNCONSCIOUS|FAINTING|RESPIRAT\w*|BREATH(?:ING)?|CARDIAC|SEIZURE|CONVULSI\w*|DIABETIC|BP READ)\b|MVA-MED/i,
+      police: /\b(POLICE|OFFICER|DOMESTIC|TRESPASS\S*|SUSPICIOUS|MISSING PERSON|CRIMINAL|CRIM\b|WELFARE|THEFT|ROBBERY|ASSAULT|FIGHT\b|DISORDERLY|SHOOTING|REPORT\w*|DRUG\S*|DISPUTE|LARCENY|HARASSMENT|FRAUD|BURGLARY|LOCKOUT|NOISE COMPLAINT|SHOTS FIRED|VEHICLE STOLEN|ORDER OF PROTECTION|PROPERTY (?:FOUND|LOST)|TRAFFIC HAZARD|DISABLED VEHICLE|PREMISE CHECK|INVESTIGAT\w*|JUVENILE|NEIGHBOR PROBLEM|ANIMAL)\b|\bPD\b|MVA-PD/i,
     };
     function classify(f) {
-      const text = `${f.properties.type ?? ''} ${f.properties.title ?? ''}`.toUpperCase();
-      for (const key of ['fire', 'ems', 'police']) if (CATEGORY_RX[key].test(text)) return key;
+      const type = (f.properties.type ?? '').toUpperCase();
+      const text = `${type} ${f.properties.title ?? ''}`.toUpperCase();
+      if (CATEGORY_RX.fire.test(text)) return 'fire';
+      if (EMS_CODE_RX.test(type) || CATEGORY_RX.ems.test(text)) return 'ems';
+      if (CATEGORY_RX.police.test(text)) return 'police';
       return 'other';
     }
 
