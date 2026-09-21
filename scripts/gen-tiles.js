@@ -14,7 +14,7 @@ const TILE = (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
 const SW = { lat: 42.8, lng: -76.6 };
 const NE = { lat: 43.6, lng: -75.0 };
 const ZMIN = 7;
-const ZMAX = 12;
+const ZMAX = 14; // was 12; user wants finer detail (T9)
 // A little breathing room beyond the box edge so panning near it doesn't hit
 // a gap before maxBoundsViscosity pulls back.
 const PAD = 1;
