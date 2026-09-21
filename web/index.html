@@ -51,8 +51,13 @@
     <button id="update">Update map</button>
     <button id="theme" class="ghost" title="Toggle light/dark basemap" aria-label="Toggle light or dark basemap">Dark</button>
     <span id="status" role="status" aria-live="polite"></span>
-    <span class="credit">Data: oneidacountyny.gov public feed · open source</span>
+    <span class="credit">Data: oneidacountyny.gov + ongov.net public feeds · open source</span>
   </header>
+  <div style="display:flex;align-items:center;gap:8px;padding:6px 14px;background:var(--panel);border-bottom:1px solid var(--border)">
+    <span style="font-size:12px;color:var(--muted)">County:</span>
+    <button class="chip on" data-county="oneida" aria-pressed="true">Oneida</button>
+    <button class="chip on" data-county="onondaga" aria-pressed="true">Onondaga</button>
+  </div>
   <div id="chips" role="group" aria-label="Filter incident types"></div>
   <div id="map"></div>
 
@@ -109,12 +114,25 @@
 
     let allFeatures = [];
     const hiddenTypes = new Set();
+    const hiddenCounties = new Set(); // T11: Oneida + Onondaga toggles above the type chips
+
+    // Counties present in the fetched window drive which toggle buttons are shown/enabled.
+    function visibleFeatures() {
+      return allFeatures.filter((f) => !hiddenCounties.has(f.properties.county));
+    }
+
+    function buildCountyToggles() {
+      document.querySelectorAll('[data-county]').forEach((btn) => {
+        btn.classList.toggle('on', !hiddenCounties.has(btn.dataset.county));
+        btn.setAttribute('aria-pressed', String(!hiddenCounties.has(btn.dataset.county)));
+      });
+    }
 
     function renderHeat() {
       for (const l of heatLayers) map.removeLayer(l);
       heatLayers = [];
       const byType = new Map();
-      for (const f of allFeatures) {
+      for (const f of visibleFeatures()) {
         const t = f.properties.type || null;
         if (hiddenTypes.has(t)) continue;
         const p = [f.geometry.coordinates[1], f.geometry.coordinates[0]];
@@ -129,7 +147,7 @@
       const shown = [...byType.values()].reduce((n, a) => n + a.length, 0);
       // Freshness (T12 trust signal): newest lastSeenAt across visible rows, human-readable.
       let latest = null;
-      for (const f of allFeatures) {
+      for (const f of visibleFeatures()) {
         if (hiddenTypes.has(f.properties.type || null)) continue;
         const ts = Date.parse(f.properties.lastSeenAt);
         if (!Number.isNaN(ts) && (!latest || ts > latest.ts)) latest = { ts, at: new Date(ts).toLocaleString() };
@@ -144,18 +162,26 @@
     function buildChips() {
       const box = document.getElementById('chips');
       box.textContent = '';
+      // County toggles reflect what is present in the fetched window (legacy rows have no county).
+      const presentCounties = new Set(allFeatures.map((f) => f.properties.county));
+      document.querySelectorAll('[data-county]').forEach((btn) => {
+        btn.disabled = !presentCounties.has(btn.dataset.county);
+        if (btn.disabled) hiddenCounties.delete(btn.dataset.county);
+      });
+      buildCountyToggles();
       const counts = new Map();
-      for (const f of allFeatures) {
+      for (const f of visibleFeatures()) {
         const t = f.properties.type || '(untyped)';
         counts.set(t, (counts.get(t) ?? 0) + 1);
       }
       hiddenTypes.clear();
       const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
       if (!sorted.length) return;
+      const shownNow = visibleFeatures().length;
       const reset = document.createElement('button');
       reset.className = 'chip on';
       reset.id = 'chip-all';
-      reset.textContent = `All (${allFeatures.length})`;
+      reset.textContent = `All (${shownNow})`;
       reset.addEventListener('click', () => {
         hiddenTypes.clear();
         syncChipStates();
@@ -204,7 +230,12 @@
         const res = await fetch(`${API_URL}?${params.toString()}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const geo = await res.json();
-        allFeatures = geo.features;
+        // Pre-T11 Oneida rows carry no county property; treat them as oneida so the
+        // toggle row stays consistent with what the API returns untagged.
+        allFeatures = geo.features.map((f) => ({
+          ...f,
+          properties: { ...f.properties, county: f.properties.county ?? 'oneida' },
+        }));
         buildChips();
         renderHeat();
         const pts = allFeatures.map((f) => [f.geometry.coordinates[1], f.geometry.coordinates[0]]);
@@ -251,6 +282,17 @@
     document.getElementById('theme').addEventListener('click', () => {
       savedDark = !document.body.classList.contains('dark');
       applyTheme(savedDark);
+    });
+
+    // T11 county toggles: hide/show an entire county's incidents without re-fetching;
+    // type chips above already respect the same hiddenCounties set via visibleFeatures().
+    document.querySelectorAll('[data-county]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const c = btn.dataset.county;
+        if (hiddenCounties.has(c)) hiddenCounties.delete(c); else hiddenCounties.add(c);
+        buildCountyToggles();
+        renderHeat();
+      });
     });
 
     document.getElementById('update').addEventListener('click', update);

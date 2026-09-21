@@ -107,3 +107,49 @@ test('parseHtmlFallback is defensive on empty or non-HTML input', () => {
   assert.deepEqual(parseHtmlFallback(''), []);
   assert.deepEqual(parseHtmlFallback(null), []);
 });
+
+import { parseCadinet } from '../src/ingest/parse.js';
+
+const CADINET_HTML = readFileSync(join(here, 'fixtures', 'cadinet.snippet.html'), 'utf8');
+
+test('parseCadinet parses all rows of the real Onondaga event table', () => {
+  const { incidents, skipped } = parseCadinet(CADINET_HTML);
+  assert.equal(skipped, 0);
+  // The fixture table has 10 data rows; every one carries address + time fields.
+  assert.ok(incidents.length >= 9, `expected ~10 incidents, got ${incidents.length}`);
+});
+
+test('parseCadinet maps first row fields (agency, type, street, cross, wall-clock→UTC)', () => {
+  const { incidents } = parseCadinet(CADINET_HTML);
+  const [first] = incidents;
+  assert.deepEqual(first.departments, ['Dewitt Fire Department']);
+  assert.equal(first.type, 'ALARM');
+  assert.equal(first.title, 'DEERFIELD RD x FRANKLIN PARK DR & SAGINAW DR');
+  assert.equal(first.status, 'Active');
+  assert.equal(first.lat, null); // no coordinates in this feed — geocoding step fills them
+  assert.equal(first.lng, null);
+  // "09/20/26 23:32" America/New_York EDT → 03:32 UTC next day
+  assert.equal(first.dateFirstIso, '2026-09-21T03:32:00.000Z');
+  assert.equal(first.dedupKey, 'TITLE:09-21T03:32:deerfieldrd'); // minute-slice + street slug
+});
+
+test('parseCadinet dedup keys are stable across re-scrapes of the same table', () => {
+  const a = parseCadinet(CADINET_HTML).incidents.map((i) => i.dedupKey);
+  const b = parseCadinet(CADINET_HTML.replace(/\s+/g, ' ')).incidents.map((i) => i.dedupKey);
+  assert.deepEqual(a, b);
+});
+
+test('parseCadinet tolerates malformed / empty input without throwing', () => {
+  assert.deepEqual(parseCadinet('').incidents, []);
+  assert.deepEqual(parseCadinet(null), { incidents: [], skipped: 0 });
+  const rowsOnly = `<!DOCTYPE html><html><body>
+    <table class="dataTableEx"><thead><tr><td colspan="6">headers</td></tr></thead>
+      <tbody>
+        <tr><td>x</td><td>y</td></tr><!-- too few cells → ignored, not counted -->
+        <tr>${'<td></td>'.repeat(7)}</tr><!-- zero fields → skipped -->
+      </tbody>
+    </table></body></html>`;
+  const { incidents, skipped } = parseCadinet(rowsOnly);
+  assert.equal(incidents.length, 0);
+  assert.equal(skipped, 1);
+});

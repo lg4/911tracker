@@ -26,3 +26,6 @@ functions/local.settings.json
 # Terraform
 infra/.terraform/
 infra/*.tfstate*
+
+# Local tooling caches
+.impeccable/

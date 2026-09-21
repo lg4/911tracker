@@ -38,6 +38,7 @@ async function handler(req, context) {
       until: untilIso,
       type: q.type || undefined,
       status: q.status || undefined,
+      county: q.county || undefined,
       limit,
     });
     // The v4/Kestrel host coerces object bodies via .toString() ("[object Object]")

@@ -20,8 +20,8 @@ export function numOrNull(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-export function inBbox(lat, lng) {
-  const b = config.bbox;
+export function inBbox(lat, lng, bbox) {
+  const b = bbox ?? config.sources[0].bbox;
   return lat >= b.latMin && lat <= b.latMax && lng >= b.lngMin && lng <= b.lngMax;
 }
 
@@ -35,13 +35,14 @@ export function splitDepartments(value) {
 }
 
 // Map one raw county record to a normalized incident. Returns null for records that are
-// missing an identity or have coordinates outside the plausible Oneida County box.
-export function recordToIncident(record) {
+// missing an identity or have coordinates outside the given county's bbox (defaults to
+// the historical Oneida box). `county` tags the row so multi-county data stays separable.
+export function recordToIncident(record, opts = {}) {
   if (!record || typeof record !== 'object') return null;
 
   const lat = numOrNull(record.Lat);
   const lng = numOrNull(record.Lng);
-  if (lat == null || lng == null || !inBbox(lat, lng)) return null;
+  if (lat == null || lng == null || !inBbox(lat, lng, opts.bbox)) return null;
 
   const sourceId =
     record.ID != null && !Number.isNaN(Number(record.ID))
@@ -74,6 +75,79 @@ export function recordToIncident(record) {
     // Keep the original record so we can re-derive fields later if parsing changes.
     raw: record,
   };
+}
+
+// Parse one raw record shaped like a CAD portal row (Onondaga's "all active events" page):
+// no coordinates, no stable ID — identity comes from date + street. Fields map onto the
+// same incident shape; lat/lng stay null until the geocoding step fills them. Returns
+// null when the row has neither a usable time nor address.
+export function cadinetRowToIncident(row, opts = {}) {
+  if (!row || typeof row !== 'object') return null;
+  const street = [row.streetPre, row.streetName, row.streetType].filter(Boolean).join(' ').trim();
+  const cross = [row.cross1, row.cross2].filter(Boolean).join(' & ').trim() || null;
+  const title = [street, cross ? `x ${cross}` : null, row.compliment]
+    .filter(Boolean)
+    .join(' ')
+    .trim() || null;
+  if (!title && !row.timeIso) return null;
+
+  // No per-incident ID in this feed: dedup on wall-clock minute + normalized street so a
+  // re-scrape of the same event maps to the same rowKey across ticks.
+  const slug = street.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const key = `${(row.timeIso ?? '').slice(5, 16)}:${slug || (title ? title.toLowerCase() : '')}`;
+
+  return {
+    dedupKey: title ? `TITLE:${key}` : `CAD:${key}`,
+    sourceId: null,
+    title,
+    type: row.type ? String(row.type).toUpperCase() : null,
+    status: 'Active', // the portal only lists active events; closed ones disappear
+    departments: row.agency ? [row.agency.trim()] : [],
+    location: title,
+    lat: null,
+    lng: null,
+    icon: null,
+    callNumber: null,
+    dateFirstIso: row.timeIso,
+    createdAtIso: row.timeIso,
+    lastEditedAtIso: null,
+    raw: row.raw ?? null,
+  };
+}
+
+// Parse the Onondaga CAD "all active events" table (IBM JSF markup, ISO-8859-1). Rows are
+// keyed off span id patterns so they survive cosmetic CSS drift; malformed rows are
+// counted as skipped, never thrown. Times are MM/DD/YY HH:MM America/New_York wall clock.
+export function parseCadinet(html) {
+  const $ = cheerio.load(String(html));
+  let skipped = 0;
+  const incidents = [];
+  $('table.dataTableEx tbody tr').each((_, trEl) => {
+    const $tr = $(trEl);
+    const cells = $tr.find('td');
+    if (cells.length < 6) return; // header/foot rows have fewer columns
+    const textOf = (idSuffix) =>
+      $tr.find(`span[id*="${idSuffix.replace(/:/g, '')}"]`).map((_, s) => $(s).text()).get().join('').trim() || null;
+    const timeMatch = String(textOf('mmdd') ?? '').match(/^(\d{2})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2})$/);
+    const timeIso = timeMatch
+      ? normalizeTimestamp(`20${timeMatch[3]}-${timeMatch[1]}-${timeMatch[2]} ${timeMatch[4]}:${timeMatch[5]}:00`)
+      : null;
+    const row = cadinetRowToIncident({
+      agency: textOf(':text7'),
+      timeIso,
+      type: textOf('typ_desc'),
+      streetPre: textOf('edirpre'),
+      streetName: textOf('efeanme'),
+      streetType: textOf('efeatyp'),
+      compliment: textOf('ecompl'),
+      cross1: textOf('xstreet1'),
+      cross2: textOf('xstreet2'),
+      raw: $tr.text().replace(/\s+/g, ' ').trim(),
+    });
+    if (row) incidents.push(row);
+    else skipped += 1;
+  });
+  return { incidents, skipped };
 }
 
 // Parse the JSON feed body into valid incidents. Accepts a bare array or an object with

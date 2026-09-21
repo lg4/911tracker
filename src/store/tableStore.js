@@ -67,6 +67,7 @@ function toEntity(inc, { partitionKey, firstSeenAt, pollCount, originPartition }
   };
   if (inc.sourceId != null) e.sourceId = inc.sourceId;
   const strings = {
+    county: inc.county,
     title: inc.title,
     type: inc.type,
     status: inc.status,
@@ -191,6 +192,7 @@ export async function fetchRange(clients, opts = {}) {
   const limit = Math.min(Number(opts.limit ?? 2000), 5000);
   const typeFilter = opts.type ? ` and type eq '${opts.type.replace(/'/g, "''")}'` : '';
   const statusFilter = opts.status ? ` and status eq '${opts.status.replace(/'/g, "''")}'` : '';
+  const countyFilter = opts.county ? ` and county eq '${opts.county.replace(/'/g, "''")}'` : '';
   // ISO-8601 UTC strings compare chronologically as plain strings.
   const dayAfterUntil = new Date(new Date(untilIso).setUTCHours(24)).toISOString();
   const rangeFilter = ` and dateFirst ge '${sinceIso}' and dateFirst lt '${dayAfterUntil}'`;
@@ -205,7 +207,7 @@ export async function fetchRange(clients, opts = {}) {
         // System key columns are case-sensitive (PartitionKey); custom props keep their casing.
         // No $select: partitions hold tens of rows at most, and full entities sidestep any
         // client-side case normalization differences between the service and test fakes.
-        filter: `PartitionKey eq '${part}'${rangeFilter}${typeFilter}${statusFilter}`,
+        filter: `PartitionKey eq '${part}'${rangeFilter}${typeFilter}${statusFilter}${countyFilter}`,
       },
     })) {
       if (e.partitionKey === part) rows.push(e);
@@ -221,11 +223,16 @@ export async function fetchRange(clients, opts = {}) {
 
   return {
     type: 'FeatureCollection',
-    features: [...byRowKey.values()].map((r) => ({
+    // Rows without resolved coordinates (un-geocoded CAD rows) can't form a valid Point;
+    // skip them rather than emit [undefined, NaN] inside an otherwise-valid collection.
+    features: [...byRowKey.values()]
+      .filter((r) => Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lng)))
+      .map((r) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [r.lng, Number(r.lat)] },
       properties: {
         dedupKey: r.rowKey,
+        county: r.county,
         sourceId: r.sourceId != null ? Number(r.sourceId) : undefined,
         title: r.title,
         type: r.type,
