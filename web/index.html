@@ -80,9 +80,10 @@
       minZoom: 7,
       maxZoom: 14,
     });
-    // Start framed exactly on the covered box so the first paint shows only
-    // real basemap (no edge voids); update() re-fits once incidents arrive.
-    map.fitBounds(BOUNDS);
+    // Start centered on Utica (the original Oneida focus); update() re-fits once
+    // incidents arrive. maxBounds above still lets panning reach Syracuse if the
+    // user toggles Onondaga back on.
+    map.setView([43.1, -75.23], 9);
 
     // Keep Leaflet's internal size in sync when the flex layout changes
     // (window resize, mobile orientation change, header re-wrapping).
