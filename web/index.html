@@ -14,21 +14,22 @@
     /* Panning beyond the local tile pyramid shows this "no coverage" fill
        instead of a broken white void. */
     .leaflet-container { background: #d7e3ee; }
-    :root { --bg: #1c2330; --panel: #232b3a; --text: #e8ecf3; --muted: #aab4c5; --border: #3a4555; --accent: #3d7eff; }
+    :root { --bg: #1c2330; --panel: #232b3a; --text: #e8ecf3; --muted: #aab4c5; --border: #3a4555; --accent: #2563eb; }
     body.light { --bg: #f2f5fa; --panel: #ffffff; --text: #1c2330; --muted: #5b6b82; --border: #cdd6e4; }
     header { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: var(--bg); color: var(--text); flex-wrap: wrap; }
     header h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 600; }
     header label { font-size: 13px; color: var(--muted); }
     input[type=date] { padding: 4px 6px; border-radius: 4px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
     button { padding: 5px 12px; border-radius: 4px; border: none; background: var(--accent); color: white; cursor: pointer; font-size: 13px; }
+    :focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
     button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
     button.ghost.active { color: var(--text); border-color: var(--accent); }
     #status { font-size: 13px; color: var(--muted); min-width: 90px; }
-    .credit { font-size: 11px; color: var(--muted); opacity: .7; }
+    .credit { font-size: 12px; color: var(--muted); }
     /* Incident-type filter chips (T8): one pill per type seen in the fetched window. */
     #chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--border); }
-    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text); font-size: 12px; cursor: pointer; opacity: .5; }
-    .chip.on { opacity: 1; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px dashed var(--border); background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; text-decoration: line-through; }
+    .chip.on { border-style: solid; background: var(--panel); color: var(--text); text-decoration: none; }
     .chip .dot { width: 8px; height: 8px; border-radius: 50%; }
     body.dark .leaflet-tile {
       /* Darken the local OSM tiles with a pure-CSS transform so the map matches
@@ -48,8 +49,8 @@
       <button class="ghost active" data-days="30">30 days</button>
     </span>
     <button id="update">Update map</button>
-    <button id="theme" class="ghost" title="Toggle light/dark basemap" aria-label="Toggle theme">🌙 Dark</button>
-    <span id="status"></span>
+    <button id="theme" class="ghost" title="Toggle light/dark basemap" aria-label="Toggle light or dark basemap">Dark</button>
+    <span id="status" role="status" aria-live="polite"></span>
     <span class="credit">Data: oneidacountyny.gov public feed · open source</span>
   </header>
   <div id="chips" role="group" aria-label="Filter incident types"></div>
@@ -94,7 +95,7 @@
 
     let heatLayers = []; // one L.heatLayer per visible incident type (T8 color coding)
     const TYPE_COLORS = ['#e63946', '#2a9d8f', '#e9c46a', '#4361ee', '#f72585', '#8ac926', '#ff8811', '#00b4d8', '#9d4edd', '#fb5607'];
-    const NEUTRAL = '#3d7eff';
+    const NEUTRAL = '#2563eb';
     const typeColors = new Map();
     function colorFor(type) {
       if (!type) return NEUTRAL;
@@ -126,7 +127,18 @@
         heatLayers.push(L.heatLayer(pts, { radius: 22, blur: 18, maxZoom: 14, gradient: gradientFor(colorFor(t)) }).addTo(map));
       }
       const shown = [...byType.values()].reduce((n, a) => n + a.length, 0);
-      document.getElementById('status').textContent = `${shown} incident${shown === 1 ? '' : 's'}`;
+      // Freshness (T12 trust signal): newest lastSeenAt across visible rows, human-readable.
+      let latest = null;
+      for (const f of allFeatures) {
+        if (hiddenTypes.has(f.properties.type || null)) continue;
+        const ts = Date.parse(f.properties.lastSeenAt);
+        if (!Number.isNaN(ts) && (!latest || ts > latest.ts)) latest = { ts, at: new Date(ts).toLocaleString() };
+      }
+      let label = shown === 0
+        ? 'No incidents in this window — try widening the dates'
+        : `${shown} incident${shown === 1 ? '' : 's'}`;
+      if (latest) label += ` · updated ${latest.at}`;
+      document.getElementById('status').textContent = label;
     }
 
     function buildChips() {
@@ -160,6 +172,7 @@
         dot.className = 'dot';
         dot.style.background = colorFor(key);
         chip.append(dot, ` ${t} (${n})`);
+        chip.setAttribute('aria-pressed', 'true');
         chip.addEventListener('click', () => {
           hiddenTypes.has(key) ? hiddenTypes.delete(key) : hiddenTypes.add(key);
           syncChipStates();
@@ -171,9 +184,12 @@
 
     function syncChipStates() {
       document.getElementById('chips').querySelectorAll('.chip[data-type]').forEach((c) => {
-        c.classList.toggle('on', !hiddenTypes.has(c.dataset.type === '(untyped)' ? null : c.dataset.type));
+        const visible = !hiddenTypes.has(c.dataset.type === '(untyped)' ? null : c.dataset.type);
+        c.classList.toggle('on', visible);
+        c.setAttribute('aria-pressed', String(visible));
       });
-      document.getElementById('chip-all')?.classList.toggle('on', hiddenTypes.size === 0);
+      const all = document.getElementById('chip-all');
+      if (all) { all.classList.toggle('on', hiddenTypes.size === 0); all.setAttribute('aria-pressed', String(hiddenTypes.size === 0)); }
     }
 
     async function update() {
@@ -183,7 +199,7 @@
       const params = new URLSearchParams();
       if (since) params.set('since', since);
       if (until) params.set('until', until);
-      statusEl.textContent = 'loading…';
+      statusEl.textContent = 'Loading…';
       try {
         const res = await fetch(`${API_URL}?${params.toString()}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -196,7 +212,8 @@
           map.fitBounds(L.latLngBounds([Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1]))], [Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))]).pad(0.15));
         }
       } catch (err) {
-        statusEl.textContent = `error: ${err.message}`;
+        // Plain-language failure with a recovery path: the Update button retries.
+        statusEl.textContent = `Couldn't load incidents (${err.message}) — hit "Update map" to retry`;
       }
     }
 
@@ -224,7 +241,7 @@
       document.body.classList.toggle('dark', dark);
       document.body.classList.toggle('light', !dark);
       const b = document.getElementById('theme');
-      b.textContent = dark ? '🌙 Dark' : '☀️ Light';
+      b.textContent = dark ? 'Dark' : 'Light';
       try { localStorage.setItem('theme-dark', dark ? '1' : ''); } catch {}
     }
     // Dark is the default look; only an explicit stored 'light' choice overrides it.
