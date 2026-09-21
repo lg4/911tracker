@@ -14,13 +14,27 @@
     /* Panning beyond the local tile pyramid shows this "no coverage" fill
        instead of a broken white void. */
     .leaflet-container { background: #d7e3ee; }
-    header { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: #1c2330; color: #e8ecf3; flex-wrap: wrap; }
+    :root { --bg: #1c2330; --panel: #232b3a; --text: #e8ecf3; --muted: #aab4c5; --border: #3a4555; --accent: #3d7eff; }
+    body.light { --bg: #f2f5fa; --panel: #ffffff; --text: #1c2330; --muted: #5b6b82; --border: #cdd6e4; }
+    header { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: var(--bg); color: var(--text); flex-wrap: wrap; }
     header h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 600; }
-    header label { font-size: 13px; color: #aab4c5; }
-    input[type=date] { padding: 4px 6px; border-radius: 4px; border: 1px solid #3a4555; background: #232b3a; color: #e8ecf3; }
-    button { padding: 5px 12px; border-radius: 4px; border: none; background: #3d7eff; color: white; cursor: pointer; font-size: 13px; }
-    #status { font-size: 13px; color: #aab4c5; min-width: 90px; }
-    .credit { font-size: 11px; color: #7d8aa0; }
+    header label { font-size: 13px; color: var(--muted); }
+    input[type=date] { padding: 4px 6px; border-radius: 4px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
+    button { padding: 5px 12px; border-radius: 4px; border: none; background: var(--accent); color: white; cursor: pointer; font-size: 13px; }
+    button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    button.ghost.active { color: var(--text); border-color: var(--accent); }
+    #status { font-size: 13px; color: var(--muted); min-width: 90px; }
+    .credit { font-size: 11px; color: var(--muted); opacity: .7; }
+    /* Incident-type filter chips (T8): one pill per type seen in the fetched window. */
+    #chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--border); }
+    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text); font-size: 12px; cursor: pointer; opacity: .5; }
+    .chip.on { opacity: 1; }
+    .chip .dot { width: 8px; height: 8px; border-radius: 50%; }
+    body.dark .leaflet-tile {
+      /* Darken the local OSM tiles with a pure-CSS transform so the map matches
+         the dark app chrome without any second tile set or external service. */
+      filter: invert(1) hue-rotate(200deg) brightness(.9) contrast(.9);
+    }
   </style>
 </head>
 <body>
@@ -28,10 +42,17 @@
     <h1>Oneida County, NY — 911 activity heatmap</h1>
     <label>From <input type="date" id="since" /></label>
     <label>To <input type="date" id="until" /></label>
+    <span style="display:flex;gap:6px">
+      <button class="ghost" data-days="1">Today</button>
+      <button class="ghost" data-days="7">7 days</button>
+      <button class="ghost active" data-days="30">30 days</button>
+    </span>
     <button id="update">Update map</button>
+    <button id="theme" class="ghost" title="Toggle light/dark basemap" aria-label="Toggle theme">🌙 Dark</button>
     <span id="status"></span>
     <span class="credit">Data: oneidacountyny.gov public feed · open source</span>
   </header>
+  <div id="chips" role="group" aria-label="Filter incident types"></div>
   <div id="map"></div>
 
   <script src="vendor/leaflet.js"></script>
@@ -71,14 +92,89 @@
       noWrap: true,
     }).addTo(map);
 
-    let heatLayer = null;
-
-    function daysAgo(n) {
-      const d = new Date(Date.now() - n * 24 * 60 * 60 * 1000);
-      return d.toISOString().slice(0, 10);
+    let heatLayers = []; // one L.heatLayer per visible incident type (T8 color coding)
+    const TYPE_COLORS = ['#e63946', '#2a9d8f', '#e9c46a', '#4361ee', '#f72585', '#8ac926', '#ff8811', '#00b4d8', '#9d4edd', '#fb5607'];
+    const NEUTRAL = '#3d7eff';
+    const typeColors = new Map();
+    function colorFor(type) {
+      if (!type) return NEUTRAL;
+      if (!typeColors.has(type)) typeColors.set(type, TYPE_COLORS[typeColors.size % TYPE_COLORS.length]);
+      return typeColors.get(type);
     }
-    document.getElementById('since').value = daysAgo(30);
-    document.getElementById('until').value = daysAgo(0);
+    // leaflet-heat paints through a 0→1 gradient ramp; pin most of it to the type's own color.
+    function gradientFor(color) {
+      return { 0.15: 'transparent', 0.3: color + '55', 0.6: color + 'aa', 0.9: color };
+    }
+
+    let allFeatures = [];
+    const hiddenTypes = new Set();
+
+    function renderHeat() {
+      for (const l of heatLayers) map.removeLayer(l);
+      heatLayers = [];
+      const byType = new Map();
+      for (const f of allFeatures) {
+        const t = f.properties.type || null;
+        if (hiddenTypes.has(t)) continue;
+        const p = [f.geometry.coordinates[1], f.geometry.coordinates[0]];
+        if (!byType.has(t)) byType.set(t, []);
+        byType.get(t).push(p);
+      }
+      for (const [t, pts] of byType) {
+        // Per-type layers keep colors distinct when filtering is active; with every
+        // type visible they simply stack in their own hue.
+        heatLayers.push(L.heatLayer(pts, { radius: 22, blur: 18, maxZoom: 14, gradient: gradientFor(colorFor(t)) }).addTo(map));
+      }
+      const shown = [...byType.values()].reduce((n, a) => n + a.length, 0);
+      document.getElementById('status').textContent = `${shown} incident${shown === 1 ? '' : 's'}`;
+    }
+
+    function buildChips() {
+      const box = document.getElementById('chips');
+      box.textContent = '';
+      const counts = new Map();
+      for (const f of allFeatures) {
+        const t = f.properties.type || '(untyped)';
+        counts.set(t, (counts.get(t) ?? 0) + 1);
+      }
+      hiddenTypes.clear();
+      const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+      if (!sorted.length) return;
+      const reset = document.createElement('button');
+      reset.className = 'chip on';
+      reset.id = 'chip-all';
+      reset.textContent = `All (${allFeatures.length})`;
+      reset.addEventListener('click', () => {
+        hiddenTypes.clear();
+        syncChipStates();
+        renderHeat();
+      });
+      box.appendChild(reset);
+      for (const [t, n] of sorted) {
+        const key = t === '(untyped)' ? null : t;
+        const chip = document.createElement('button');
+        chip.className = 'chip on';
+        chip.dataset.type = t;
+        chip.title = `${n} incident${n === 1 ? '' : 's'}`;
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        dot.style.background = colorFor(key);
+        chip.append(dot, ` ${t} (${n})`);
+        chip.addEventListener('click', () => {
+          hiddenTypes.has(key) ? hiddenTypes.delete(key) : hiddenTypes.add(key);
+          syncChipStates();
+          renderHeat();
+        });
+        box.appendChild(chip);
+      }
+    }
+
+    function syncChipStates() {
+      document.getElementById('chips').querySelectorAll('.chip[data-type]').forEach((c) => {
+        c.classList.toggle('on', !hiddenTypes.has(c.dataset.type === '(untyped)' ? null : c.dataset.type));
+      });
+      document.getElementById('chip-all')?.classList.toggle('on', hiddenTypes.size === 0);
+    }
 
     async function update() {
       const statusEl = document.getElementById('status');
@@ -92,19 +188,53 @@
         const res = await fetch(`${API_URL}?${params.toString()}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const geo = await res.json();
-        const points = geo.features.map((f) => [f.geometry.coordinates[1], f.geometry.coordinates[0]]);
-        if (heatLayer) map.removeLayer(heatLayer);
-        heatLayer = L.heatLayer(points, { radius: 22, blur: 18, maxZoom: 14 }).addTo(map);
-        statusEl.textContent = `${geo.features.length} incidents`;
-        if (points.length) {
-          const lats = points.map((p) => p[0]);
-          const lngs = points.map((p) => p[1]);
-          map.fitBounds(L.latLngBounds([Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]).pad(0.15));
+        allFeatures = geo.features;
+        buildChips();
+        renderHeat();
+        const pts = allFeatures.map((f) => [f.geometry.coordinates[1], f.geometry.coordinates[0]]);
+        if (pts.length) {
+          map.fitBounds(L.latLngBounds([Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1]))], [Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))]).pad(0.15));
         }
       } catch (err) {
         statusEl.textContent = `error: ${err.message}`;
       }
     }
+
+    function daysAgo(n) {
+      const d = new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+      return d.toISOString().slice(0, 10);
+    }
+    document.getElementById('since').value = daysAgo(30);
+    document.getElementById('until').value = daysAgo(0);
+
+    // Quick time-window buttons: set the date inputs, then refresh in one click.
+    document.querySelectorAll('button[data-days]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        // data-days is the window in days inclusive of today: Today → 0 days back.
+        document.getElementById('since').value = daysAgo(Math.max(Number(btn.dataset.days) - 1, 0));
+        document.getElementById('until').value = daysAgo(0);
+        document.querySelectorAll('button[data-days]').forEach((b) => b.classList.toggle('active', b === btn));
+        update();
+      });
+    });
+
+    // Light/dark toggle (T10): dark is the default look; light flips CSS variables and
+    // keeps the tile layer as-is (no second pyramid needed). Persisted per browser.
+    function applyTheme(dark) {
+      document.body.classList.toggle('dark', dark);
+      document.body.classList.toggle('light', !dark);
+      const b = document.getElementById('theme');
+      b.textContent = dark ? '🌙 Dark' : '☀️ Light';
+      try { localStorage.setItem('theme-dark', dark ? '1' : ''); } catch {}
+    }
+    // Dark is the default look; only an explicit stored 'light' choice overrides it.
+    let savedDark = true;
+    try { if (localStorage.getItem('theme-dark') === '') savedDark = false; } catch {}
+    applyTheme(savedDark);
+    document.getElementById('theme').addEventListener('click', () => {
+      savedDark = !document.body.classList.contains('dark');
+      applyTheme(savedDark);
+    });
 
     document.getElementById('update').addEventListener('click', update);
     update();
