@@ -56,7 +56,9 @@
   <div style="display:flex;align-items:center;gap:8px;padding:6px 14px;background:var(--panel);border-bottom:1px solid var(--border)">
     <span style="font-size:12px;color:var(--muted)">County:</span>
     <button class="chip on" data-county="oneida" aria-pressed="true">Oneida</button>
-    <button class="chip on" data-county="onondaga" aria-pressed="true">Onondaga</button>
+    <!-- T15: Onondaga off by default — CADInet rows carry no street/area context, so
+         its points don't mean anything relative to an area; ingest keeps storing it. -->
+    <button class="chip" data-county="onondaga" aria-pressed="false">Onondaga</button>
   </div>
   <div id="chips" role="group" aria-label="Filter incident categories"></div>
   <div id="map"></div>
@@ -139,7 +141,9 @@
 
     let allFeatures = [];
     const hiddenCats = new Set();
-    const hiddenCounties = new Set(); // T11: Oneida + Onondaga toggles above the type chips
+    // T11 toggles above the type chips; initial on/off comes from the static markup
+    // (T15 ships Onondaga off by default) rather than assuming everything visible.
+    const hiddenCounties = new Set([...document.querySelectorAll('[data-county]')].filter((b) => !b.classList.contains('on')).map((b) => b.dataset.county));
 
     // Counties present in the fetched window drive which toggle buttons are shown/enabled.
     function visibleFeatures() {
@@ -188,9 +192,12 @@
       box.textContent = '';
       // County toggles reflect what is present in the fetched window (legacy rows have no county).
       const presentCounties = new Set(allFeatures.map((f) => f.properties.county));
+      // Absent counties are only *disabled*, never re-enabled: dropping them from
+      // hiddenCounties here would silently undo the user's off choice (or T15's
+      // default-off) the moment a refetch window lacks that county's rows. Leaving
+      // an absent county hidden is inert — it has no rows to filter out anyway.
       document.querySelectorAll('[data-county]').forEach((btn) => {
         btn.disabled = !presentCounties.has(btn.dataset.county);
-        if (btn.disabled) hiddenCounties.delete(btn.dataset.county);
       });
       buildCountyToggles();
       const counts = new Map();
@@ -260,7 +267,9 @@
         }));
         buildChips();
         renderHeat();
-        const pts = allFeatures.map((f) => [f.geometry.coordinates[1], f.geometry.coordinates[0]]);
+        // Frame the view on visible counties only — a default-hidden county (T15) must
+        // not drag the initial viewport across the box toward it.
+        const pts = visibleFeatures().map((f) => [f.geometry.coordinates[1], f.geometry.coordinates[0]]);
         if (pts.length) {
           map.fitBounds(L.latLngBounds([Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1]))], [Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))]).pad(0.15));
         }
