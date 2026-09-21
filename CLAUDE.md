@@ -15,4 +15,9 @@ deploy/failure-mode details in [docs/runbook.md](docs/runbook.md). Session hando
 No secrets exposure · one subagent/task at a time · ai-review before commit · per-task commits.
 
 ## Future improvements
-- **Incident-type layer/filter for the heatmap**: add a UI control (layer toggles or filter chips) that lets users show/hide incident types on the heatmap. The API already supports `type=` on `/api/incidents` and each feature carries its type in properties, so this is mostly web-side: fetch once, then filter client-side; consider per-type color coding when filtering is active.
+See [.tasks.md](.tasks.md) for the full queue (T8–T12 + future items). Headlines:
+- **Multi-county generic 911tracker** (T11): add Onondaga/Syracuse via `https://911events.ongov.net/CADInet/app/events.jsp`; parametrize feeds per county + tag incidents with county end-to-end. Existing map BOUNDS already cover Syracuse. TINC SY zone (`tincevents.thruway.ny.gov/tincview.aspx?zone=SY`) queued as another source.
+- **Heatmap filters** (T8 / future): incident-type layer/chips (API already supports `type=`; features carry type), time-window buttons (today/24h/week — API supports since/until), per-type color coding where type is captured from the scrape.
+- **Basemap** (T9 done z7–z14; T10 open): dark-mode variant (CARTO dark_matter keyless) alongside light or by default; regenerate via `scripts/gen-tiles.js`.
+- **Data validation** (T12): ACID-like provenance/checksums so served data matches what was live at fetch time.
+- **Cloudflare CDN fronting** of the SWA origin (tiles are large and growing).

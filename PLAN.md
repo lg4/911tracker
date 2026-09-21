@@ -34,6 +34,11 @@ Terraform outputs: `function_app_name/url`, `tables_endpoint`, `tables_connectio
 7. Function bundle needs root `host.json` (`{"version":"2.0"}`) — added at `functions/host.json` (auto-included by staging). Did NOT fix the sync error; see open issues.
 8. az CLI version here: no `staticwebapp env*` subcommands, `ad sp credential reset` (singular), `--id` required, `-u/--uri` for `az rest`.
 
+## Done this session (latest)
+
+- Verified all prior open items are resolved live: functions deploys green (root cause was empty `linuxFxVersion` → REST PUT `node|22`, see `.tasks.md` T1/UNBRICK), `/api/incidents` returns GeoJSON + pinned CORS (`Access-Control-Allow-Origin: https://salmon-smoke-0f761930f.5.azurestaticapps.net` on GET+OPTIONS — ALLOWED_ORIGIN already correct; §2 not needed), ingest E2E confirmed via `meta.last_poll` (2026-09-21T00:40Z, fetched:9 added:1). Ingest runs entirely in Azure (timer function → Table Storage); local Postgres/container only survives as the one-off seeder.
+- **T9 deeper zoom (in progress)**: `scripts/gen-tiles.js` ZMAX 12→14, regenerated pyramid z7–z14 (5710 tiles, 60M; OSM standard), `web/index.html` maxNativeZoom→14. Staged; ai-review before commit. New tasks queued: T8 type filter, T10 dark basemap.
+
 ## Done this session
 
 - tableStore fixed for @azure/data-tables v13 API + real-Azurite integration suite green (22/22); create-tables bootstrap script run; **355 incidents seeded** from local Postgres into Azure Table Storage.
@@ -45,14 +50,9 @@ Terraform outputs: `function_app_name/url`, `tables_endpoint`, `tables_connectio
 
 ## Open / next steps (in order)
 
-### 1. Functions "malformed content" sync failure (BLOCKER for function deploys)
-- Investigate actual deployed layout via Kudu: find publishing profile (`az webapp deployment list-publishing-profiles -g oneida911 -n o911func-e10tr1` — plain `list-publishing-profiles` doesn't exist in this CLI version), then `GET https://<site>.scm.azurewebsites.net/api/vfs/site/wwwroot/` with basic auth → inspect tree. Confirm whether dist contents landed at wwwroot root vs nested dir.
-- Check Function App HTTP logs for the real loader error: `az functionapp log show` / diagnostic console API.
-- Suspects: (a) functions-action zip layout nesting, (b) missing/newer runtime config expectations for node ~4 worker on consumption, (c) stale partial deployments from earlier failed runs — try `az webapp restart` + fresh run after layout confirmed correct.
-- Once green: verify code live (`curl https://o911func-e10tr1.azurewebsites.net/api/incidents?since=...`).
+### 1. ~~Functions "malformed content" sync failure~~ — **DONE** (see .tasks.md T1/UNBRICK: root cause was empty `linuxFxVersion`, fixed via REST PUT `node|22`; deploy-functions.yml green; endpoint live with GeoJSON + pinned CORS).
 
-### 2. ALLOWED_ORIGIN fix
-- `infra/main.tf:50` sets `ALLOWED_ORIGIN = "https://${local.static_site_name}.azurestaticapps.net"` → change to `azurerm_static_web_app.web.default_host_name`; apply; confirm app setting now `https://salmon-smoke-0f761930f.5.azurestaticapps.net`. Needed before CORS works from the real map origin.
+### 2. ~~ALLOWED_ORIGIN fix~~ — **DONE / not needed**: live app setting already serves `Access-Control-Allow-Origin: https://salmon-smoke-0f761930f.5.azurestaticapps.net` (verified on GET + OPTIONS preflight). If infra drift ever resets it, set `infra/main.tf` ALLOWED_ORIGIN to `azurerm_static_web_app.web.default_host_name`.
 
 ### 3. ~~Self-contained central-NY map~~ — **DONE** (commit `547fc47`; deploy-web run `35461879565` green; verified live on `salmon-smoke-0f761930f.5.azurestaticapps.net`: `/vendor/leaflet.js|css`, `/vendor/leaflet-heat.js`, `/tiles/10/296/375.png` all 200, index.html references local assets only)
 
@@ -77,7 +77,7 @@ DECISIONS CONFIRMED (user): interactive Leaflet tile-pyramid (keep pan/zoom); re
 - [ ] **HIGH** Functions "malformed content" sync failure (§1) — BLOCKER for function deploys. Fresh run `35455884828` failed again even after `az webapp restart`. Next: pull full logs (`gh run view 35455884828 --log`), inspect deployed `wwwroot` layout via Kudu publishing profile (`az webapp deployment list-publishing-profiles -g oneida911 -n o911func-e10tr1`; Kudu `/api/vfs/site/wwwroot/` was returning "service unavailable" earlier — retry warm). Suspects: functions-action zip nesting, node ~4 worker expectations on consumption, stale partial deploys. Once green → verify live `curl https://o911func-e10tr1.azurewebsites.net/api/incidents?since=...`.
 - [ ] **MED** ALLOWED_ORIGIN fix (§2): `infra/main.tf:50` → use `azurerm_static_web_app.web.default_host_name` (currently the name-derived host which 404s); `terraform apply`; confirm app setting = `https://salmon-smoke-0f761930f.5.azurestaticapps.net`. Needed before CORS works from real map origin.
 - [x] **MED** Self-contained central-NY map (§3) — DONE this session (see Done-this-session bullet + commit `547fc47`).
-- [ ] **MED** Verify ingest end-to-end (§4) after functions deploy is green: next timer tick (~10 min), new rows in `incidents`, `meta.last_poll` advances; curl `/api/incidents` GeoJSON + `access-control-allow-origin` with `Origin: https://salmon-smoke-0f761930f.5.azurestaticapps.net`; browser-check deployed map on real URL.
+- [x] **MED** ~~Verify ingest end-to-end~~ — DONE this session: `meta.last_poll` advanced to 2026-09-21T00:40Z (added:1, fetched:9); `/api/incidents` returns live GeoJSON + pinned CORS header. Ingest runs fully from the Azure function app → Table Storage; no local container/Postgres in the path.
 - [ ] **LOW** AI subagent review of both live endpoints (functions + web) — §5, run after each completed to-do.
 - [ ] **LOW** Wrap-up (§6): update `docs/runbook.md` / phase2 M5 with real SWA URL + SP-auth model + pitfalls above; retire local Postgres path (drop `pg` dep, stop docker db/ingest containers, remove local dev refs); final commit.
 
