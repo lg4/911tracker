@@ -17,7 +17,7 @@ No secrets exposure · one subagent/task at a time · ai-review before commit ·
 ## Future improvements
 See [.tasks.md](.tasks.md) for the full queue (T8–T12 + future items). Headlines:
 - **Multi-county generic 911tracker** (T11): add Onondaga/Syracuse via `https://911events.ongov.net/CADInet/app/events.jsp`; parametrize feeds per county + tag incidents with county end-to-end. Existing map BOUNDS already cover Syracuse. TINC SY zone (`tincevents.thruway.ny.gov/tincview.aspx?zone=SY`) queued as another source.
-- **Heatmap filters** (T8 / future): incident-type layer/chips (API already supports `type=`; features carry type), time-window buttons (today/24h/week — API supports since/until), per-type color coding where type is captured from the scrape.
+- **Category heat filters** (T8 done: Police/Fire/EMS/Other chips + per-category colored heat layers; time-window buttons). Future: richer category classification, per-subtype detail views.
 - **Basemap** (T9 done z7–z14; T10 open): dark-mode variant (CARTO dark_matter keyless) alongside light or by default; regenerate via `scripts/gen-tiles.js`.
 - **Data validation** (T12): ACID-like provenance/checksums so served data matches what was live at fetch time.
 - **Cloudflare CDN fronting** of the SWA origin (tiles are large and growing).

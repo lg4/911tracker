@@ -26,7 +26,7 @@
     button.ghost.active { color: var(--text); border-color: var(--accent); }
     #status { font-size: 13px; color: var(--muted); min-width: 90px; }
     .credit { font-size: 12px; color: var(--muted); }
-    /* Incident-type filter chips (T8): one pill per type seen in the fetched window. */
+    /* Category filter chips (T8): All + Police/Fire/EMS/Other pills with counts. */
     #chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--border); }
     .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px dashed var(--border); background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; text-decoration: line-through; }
     .chip.on { border-style: solid; background: var(--panel); color: var(--text); text-decoration: none; }
@@ -58,7 +58,7 @@
     <button class="chip on" data-county="oneida" aria-pressed="true">Oneida</button>
     <button class="chip on" data-county="onondaga" aria-pressed="true">Onondaga</button>
   </div>
-  <div id="chips" role="group" aria-label="Filter incident types"></div>
+  <div id="chips" role="group" aria-label="Filter incident categories"></div>
   <div id="map"></div>
 
   <script src="vendor/leaflet.js"></script>
@@ -98,22 +98,38 @@
       noWrap: true,
     }).addTo(map);
 
-    let heatLayers = []; // one L.heatLayer per visible incident type (T8 color coding)
-    const TYPE_COLORS = ['#e63946', '#2a9d8f', '#e9c46a', '#4361ee', '#f72585', '#8ac926', '#ff8811', '#00b4d8', '#9d4edd', '#fb5607'];
-    const NEUTRAL = '#2563eb';
-    const typeColors = new Map();
-    function colorFor(type) {
-      if (!type) return NEUTRAL;
-      if (!typeColors.has(type)) typeColors.set(type, TYPE_COLORS[typeColors.size % TYPE_COLORS.length]);
-      return typeColors.get(type);
+    // Incident categories (T8): raw feed types are far too varied and numerous to show
+    // as chips individually, so classify each incident into one of these for filtering
+    // and heat coloring. Keyword rules over type+title; unmatched → other.
+    const CATS = [
+      { key: 'police', label: 'Police', color: '#4361ee' },
+      { key: 'fire', label: 'Fire', color: '#e63946' },
+      { key: 'ems', label: 'EMS', color: '#2a9d8f' },
+      { key: 'other', label: 'Other', color: '#9aa0b4' },
+    ];
+    const CATEGORY_RX = {
+      fire: /\b(FIRE|BURN(?:ING)?|SMOKE|CARBON MONOXIDE|HAZMAT|CHEMICAL|ALARM)\b|MVA-FD/i,
+      ems: /\b(MEDICAL|AMBULANCE|SICK|INJUR\w*|CHEST PAIN|FALL(?:EN)?|OVERDOSE|UNRESPONSIVE|RESPIRAT\w*|CARDIAC|SEIZURE|DIABETIC|BP READ)\b|MVA-MED/i,
+      police: /\b(POLICE|DOMESTIC|TRESPASSING|SUSPICIOUS|MISSING PERSON|CRIMINAL|WELFARE|THEFT|ROBBERY|ASSAULT|FIGHT\b|DISORDERLY|SHOOTING|REPORT\w*|DRUG\S*)\b|\bPD\b|MVA-PD/i,
+    };
+    function classify(f) {
+      const text = `${f.properties.type ?? ''} ${f.properties.title ?? ''}`.toUpperCase();
+      for (const key of ['fire', 'ems', 'police']) if (CATEGORY_RX[key].test(text)) return key;
+      return 'other';
     }
-    // leaflet-heat paints through a 0→1 gradient ramp; pin most of it to the type's own color.
+
+    let heatLayers = []; // one L.heatLayer per visible category
+    // Cap the layer max low so clusters saturate through the gradient while isolated
+    // points stay near the minOpacity floor (leaflet-heat's default max of 1 would
+    // push a single incident straight to full color).
+    const HEAT_MAX = 6;
+    // Full-alpha stops over a valid hex base — never emit 3-digit-hex + appended alpha.
     function gradientFor(color) {
-      return { 0.15: 'transparent', 0.3: color + '55', 0.6: color + 'aa', 0.9: color };
+      return { 0.3: color + '33', 0.6: color + '99', 1: color };
     }
 
     let allFeatures = [];
-    const hiddenTypes = new Set();
+    const hiddenCats = new Set();
     const hiddenCounties = new Set(); // T11: Oneida + Onondaga toggles above the type chips
 
     // Counties present in the fetched window drive which toggle buttons are shown/enabled.
@@ -131,24 +147,23 @@
     function renderHeat() {
       for (const l of heatLayers) map.removeLayer(l);
       heatLayers = [];
-      const byType = new Map();
+      const byCat = new Map();
       for (const f of visibleFeatures()) {
-        const t = f.properties.type || null;
-        if (hiddenTypes.has(t)) continue;
-        const p = [f.geometry.coordinates[1], f.geometry.coordinates[0]];
-        if (!byType.has(t)) byType.set(t, []);
-        byType.get(t).push(p);
+        const c = classify(f);
+        if (hiddenCats.has(c)) continue;
+        if (!byCat.has(c)) byCat.set(c, []);
+        byCat.get(c).push([f.geometry.coordinates[1], f.geometry.coordinates[0]]);
       }
-      for (const [t, pts] of byType) {
-        // Per-type layers keep colors distinct when filtering is active; with every
-        // type visible they simply stack in their own hue.
-        heatLayers.push(L.heatLayer(pts, { radius: 22, blur: 18, maxZoom: 14, gradient: gradientFor(colorFor(t)) }).addTo(map));
+      for (const [c, pts] of byCat) {
+        // Per-category layers keep colors distinct when filtering is active; with every
+        // category visible they simply stack in their own hue.
+        heatLayers.push(L.heatLayer(pts, { radius: 22, blur: 18, maxZoom: 9, max: HEAT_MAX, gradient: gradientFor(CATS.find((x) => x.key === c).color) }).addTo(map));
       }
-      const shown = [...byType.values()].reduce((n, a) => n + a.length, 0);
+      const shown = [...byCat.values()].reduce((n, a) => n + a.length, 0);
       // Freshness (T12 trust signal): newest lastSeenAt across visible rows, human-readable.
       let latest = null;
       for (const f of visibleFeatures()) {
-        if (hiddenTypes.has(f.properties.type || null)) continue;
+        if (hiddenCats.has(classify(f))) continue;
         const ts = Date.parse(f.properties.lastSeenAt);
         if (!Number.isNaN(ts) && (!latest || ts > latest.ts)) latest = { ts, at: new Date(ts).toLocaleString() };
       }
@@ -170,11 +185,9 @@
       });
       buildCountyToggles();
       const counts = new Map();
-      for (const f of visibleFeatures()) {
-        const t = f.properties.type || '(untyped)';
-        counts.set(t, (counts.get(t) ?? 0) + 1);
-      }
-      hiddenTypes.clear();
+      hiddenCats.clear();
+      // Counts are per-category over the currently-visible counties.
+      for (const f of visibleFeatures()) counts.set(classify(f), (counts.get(classify(f)) ?? 0) + 1);
       const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
       if (!sorted.length) return;
       const shownNow = visibleFeatures().length;
@@ -183,24 +196,24 @@
       reset.id = 'chip-all';
       reset.textContent = `All (${shownNow})`;
       reset.addEventListener('click', () => {
-        hiddenTypes.clear();
+        hiddenCats.clear();
         syncChipStates();
         renderHeat();
       });
       box.appendChild(reset);
-      for (const [t, n] of sorted) {
-        const key = t === '(untyped)' ? null : t;
+      for (const [c, n] of sorted) {
+        const meta = CATS.find((x) => x.key === c);
         const chip = document.createElement('button');
         chip.className = 'chip on';
-        chip.dataset.type = t;
+        chip.dataset.type = c;
         chip.title = `${n} incident${n === 1 ? '' : 's'}`;
         const dot = document.createElement('span');
         dot.className = 'dot';
-        dot.style.background = colorFor(key);
-        chip.append(dot, ` ${t} (${n})`);
+        dot.style.background = meta.color;
+        chip.append(dot, ` ${meta.label} (${n})`);
         chip.setAttribute('aria-pressed', 'true');
         chip.addEventListener('click', () => {
-          hiddenTypes.has(key) ? hiddenTypes.delete(key) : hiddenTypes.add(key);
+          hiddenCats.has(c) ? hiddenCats.delete(c) : hiddenCats.add(c);
           syncChipStates();
           renderHeat();
         });
@@ -210,12 +223,12 @@
 
     function syncChipStates() {
       document.getElementById('chips').querySelectorAll('.chip[data-type]').forEach((c) => {
-        const visible = !hiddenTypes.has(c.dataset.type === '(untyped)' ? null : c.dataset.type);
+        const visible = !hiddenCats.has(c.dataset.type);
         c.classList.toggle('on', visible);
         c.setAttribute('aria-pressed', String(visible));
       });
       const all = document.getElementById('chip-all');
-      if (all) { all.classList.toggle('on', hiddenTypes.size === 0); all.setAttribute('aria-pressed', String(hiddenTypes.size === 0)); }
+      if (all) { all.classList.toggle('on', hiddenCats.size === 0); all.setAttribute('aria-pressed', String(hiddenCats.size === 0)); }
     }
 
     async function update() {
