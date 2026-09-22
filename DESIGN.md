@@ -168,8 +168,9 @@ exists in the system.
 - **Focus:** 2px outline in signal color, 2px offset
 
 ### Chips (filter pills)
-- **Style:** pill shape, dashed 1px border when off (muted text, strikethrough), solid border + panel background + full text when on
-- **State:** `aria-pressed` mirrors visibility; each category chip carries an 8px colored dot matching its heat layer; counts shown inline
+- **Style:** pill shape, dashed 1px border when off (muted text), solid border + panel background + full text when on
+- **State:** exclusive-select model — clicking a category isolates it as the sole visible one; `aria-pressed` mirrors that isolation, and the isolated chip's label flips to "Only <Category> (<n>)" so the state reads in text, not just color. The All chip resets. A trailing hint ("Click isolates · All resets") teaches the model at first glance.
+- Each category chip carries an 8px colored dot matching its heat layer; counts shown inline
 - **County toggles** reuse the same chip anatomy without dots
 
 ### Inputs / Fields

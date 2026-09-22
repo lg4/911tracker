@@ -294,7 +294,13 @@
         const dot = document.createElement('span');
         dot.className = 'dot';
         dot.style.background = meta.color;
-        chip.append(dot, ` ${meta.label} (${n})`);
+        // Label text node is kept addressable: syncChipStates() flips it to
+        // "Only …" when this chip is the sole visible category.
+        const lbl = document.createElement('span');
+        lbl.className = 'lbl';
+        lbl.textContent = ` ${meta.label} (${n})`;
+        chip.dataset.count = String(n);
+        chip.append(dot, lbl);
         // Exclusive select: clicking isolates that category (the only one left
         // visible); clicking the already-isolated chip again returns to All.
         chip.addEventListener('click', () => {
@@ -320,10 +326,12 @@
 
     function syncChipStates() {
       document.getElementById('chips').querySelectorAll('.chip[data-type]').forEach((c) => {
-        // aria-pressed mirrors "is this the sole visible category", not "hidden".
+        // aria-pressed mirrors "is this the sole visible category", not "hidden";
+        // the label flips to "Only …" in the same state so the isolation reads as text too.
         const isolated = selectedCat === c.dataset.type;
         c.classList.toggle('on', isolated);
         c.setAttribute('aria-pressed', String(isolated));
+        c.querySelector('.lbl').textContent = `${isolated ? 'Only' : ''} ${CATS.find((x) => x.key === c.dataset.type).label} (${Number(c.dataset.count)})`.trim();
       });
       const all = document.getElementById('chip-all');
       if (all) { all.classList.toggle('on', selectedCat === null); all.setAttribute('aria-pressed', String(selectedCat === null)); }
