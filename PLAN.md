@@ -88,7 +88,7 @@ DECISIONS CONFIRMED (user): interactive Leaflet tile-pyramid (keep pan/zoom); re
 
 > Restart-safe handoff. Statuses as of last update this session. §3 below is DONE; remove from list when renumbering.
 
-- [ ] **HIGH** Impeccable critique fixes on `web/index.html` (P1-1 exclusive chips + P1-3 reset fix → P1-2 share/refresh/export → P2-4 error color → P2-5 mobile targets). Details + order under **Impeccable critique** above; per-task commits with ai-review before each push for CI deploy. §1 malformed-content and §2 ALLOWED_ORIGIN are DONE/not-needed (see lines above) — no duplicate entries kept here.
+- [x] **HIGH** ~~Impeccable critique fixes on `web/index.html`~~ — DONE this session across per-task commits (exclusive chips, reset fix, fetch-error state, mobile tap targets ≥40px, header grouping + day-window aria-pressed, category isolation "Only …" label flip, help surface + heat legend + chip-row hint = T16, tab-title freshness leak). Critique snapshot `.impeccable/critique/2026-09-22T03-57-10Z__web.md`; remaining notes folded into T8/T12/T17 in .tasks.md. §1 malformed-content and §2 ALLOWED_ORIGIN are DONE/not-needed (see lines above) — no duplicate entries kept here.
 - [x] **MED** Self-contained central-NY map (§3) — DONE this session (see Done-this-session bullet + commit `547fc47`).
 - [x] **MED** ~~Verify ingest end-to-end~~ — DONE this session: `meta.last_poll` advanced to 2026-09-21T00:40Z (added:1, fetched:9); `/api/incidents` returns live GeoJSON + pinned CORS header. Ingest runs fully from the Azure function app → Table Storage; no local container/Postgres in the path.
 - [ ] **LOW** AI subagent review of both live endpoints (functions + web) — §5, run after each completed to-do.
