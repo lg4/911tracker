@@ -125,6 +125,7 @@
   <script src="vendor/leaflet.js"></script>
   <script src="vendor/leaflet-heat.js"></script>
   <script src="./config.js"></script>
+  <script src="./csvExport.js"></script>
   <script>
     // Central-NY focus box; the app is fully self-contained (local vendored
     // Leaflet + locally stored basemap tiles) so no external tile/CDN calls.
@@ -523,15 +524,8 @@
     function visibleAsGeoJSON() {
       return { type: 'FeatureCollection', features: visibleFeatures() };
     }
-    function toCsv(geo) {
-      const esc = (v) => `"${String(v ?? '').replaceAll('"', '""')}"`;
-      const cols = ['county', 'type', 'title', 'lat', 'lng', 'lastSeenAt'];
-      const rows = geo.features.map((f) => [
-        f.properties.county, f.properties.type, f.properties.title,
-        f.geometry.coordinates[1], f.geometry.coordinates[0], f.properties.lastSeenAt,
-      ].map(esc).join(','));
-      return [cols.join(','), ...rows].join('\n');
-    }
+    // toCsv lives in csvExport.js — loads as a plain script below and is unit-
+    // tested separately so the serializer's quoting/CRLF rules can't regress.
     async function copyText(text, label) {
       try {
         await navigator.clipboard.writeText(text);
