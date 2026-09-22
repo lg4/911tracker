@@ -380,10 +380,12 @@
         // box toward it. Every later refresh (Update button, window buttons, silent
         // auto-refresh) renders in place: the user's manual navigation is respected.
         if (!fitOnce) {
-          fitOnce = true;
           const pts = visibleFeatures().map((f) => [f.geometry.coordinates[1], f.geometry.coordinates[0]]);
           if (pts.length) {
             map.fitBounds(L.latLngBounds([Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1]))], [Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))]).pad(0.15));
+            // Consume the single framing only once it actually ran: a failed or
+            // empty first load defers framing to the next fetch that has data.
+            fitOnce = true;
           }
         }
       } catch (err) {
