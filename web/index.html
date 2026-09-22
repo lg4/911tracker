@@ -329,7 +329,11 @@
       // The previous selection survives refetches like county visibility does:
       // keep it when its category is still in the window, else fall back to all-visible.
       if (selectedCat && !presentCats.includes(selectedCat)) selectedCat = null;
-      hiddenCats = new Set(presentCats.filter((c) => c !== selectedCat));
+      // The All state (null) hides nothing: with a null selectedCat the filter
+      // below would have excluded every category from itself and blanked the map
+      // while chips still counted them — exactly the "empty until you pick one"
+      // defect users reported. Isolation is the only path that hides anything.
+      hiddenCats = selectedCat ? new Set(presentCats.filter((c) => c !== selectedCat)) : new Set();
     }
 
     function syncChipStates() {
