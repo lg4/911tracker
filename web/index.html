@@ -206,6 +206,10 @@
     let presentCats = []; // categories in the current window (built by buildChips)
     let selectedCat = null; // exclusive-select state: null = All visible
     let hiddenCats = new Set();
+    // T21: framing is initial-load-only. Once the first fetch has framed the view,
+    // later Update/window-button clicks refresh data in place and never yank the
+    // user's pan/zoom back mid-read.
+    let fitOnce = false;
     // T11 toggles above the type chips; initial on/off comes from the static markup
     // (T15 ships Onondaga off by default) rather than assuming everything visible.
     const hiddenCounties = new Set([...document.querySelectorAll('[data-county]')].filter((b) => !b.classList.contains('on')).map((b) => b.dataset.county));
@@ -371,10 +375,12 @@
         buildChips();
         renderHeat();
         statusEl.classList.remove('error'); // a successful fetch clears any prior failure styling
-        // Frame the view on visible counties only — a default-hidden county (T15) must
-        // not drag the initial viewport across the box toward it. Skipped for silent
-        // auto-refreshes: they must not yank the user's pan around mid-read.
-        if (!silent) {
+        // Frame the view on visible counties only, and only once per page load — a
+        // default-hidden county (T15) must not drag the initial viewport across the
+        // box toward it. Every later refresh (Update button, window buttons, silent
+        // auto-refresh) renders in place: the user's manual navigation is respected.
+        if (!fitOnce) {
+          fitOnce = true;
           const pts = visibleFeatures().map((f) => [f.geometry.coordinates[1], f.geometry.coordinates[0]]);
           if (pts.length) {
             map.fitBounds(L.latLngBounds([Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1]))], [Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))]).pad(0.15));
