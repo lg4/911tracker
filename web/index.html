@@ -250,6 +250,10 @@
         : `${shown} incident${shown === 1 ? '' : 's'}`;
       if (latest) label += ` · updated ${latest.at}`;
       document.getElementById('status').textContent = label;
+      // Tab-title liveness: mirror a compact freshness tick so an open-but-unfocused
+      // tab shows its data age without stealing the full status line.
+      const baseTitle = 'Oneida County 911 Activity Map';
+      document.title = latest ? `${baseTitle} · updated ${new Date(latest.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : baseTitle;
     }
 
     function buildChips() {
