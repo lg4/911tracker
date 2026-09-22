@@ -347,6 +347,13 @@
       const statusEl = document.getElementById('status');
       const since = document.getElementById('since').value || undefined;
       const until = document.getElementById('until').value || undefined;
+      // Error prevention: a since-after-until range is user input, not a feed fault —
+      // say so in plain language instead of letting the API's opaque "bad date" land.
+      if (since && until && since > until) {
+        statusEl.classList.add('error');
+        statusEl.textContent = `Start date (${since}) is after end date (${until}) — swap them to load`;
+        return;
+      }
       const params = new URLSearchParams();
       if (since) params.set('since', since);
       if (until) params.set('until', until);
