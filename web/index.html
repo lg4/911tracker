@@ -21,6 +21,10 @@
     /* position:relative anchors the absolutely-placed #about-panel to the header. */
     header { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: var(--bg); color: var(--text); flex-wrap: wrap; position: relative; }
     header h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 600; }
+    /* P2-4: visual clusters in the wrapping header — a hairline divider between
+       logical groups (title / dates / actions / info) so wrap order reads as
+       structure at a glance instead of one undifferentiated control soup. */
+    .h-div { width: 1px; align-self: stretch; background: var(--border); margin: 0 4px; flex: none; }
     header label { font-size: 13px; color: var(--muted); }
     input[type=date] { padding: 4px 6px; border-radius: 4px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
     button { padding: 5px 12px; border-radius: 4px; border: none; background: var(--accent); color: white; cursor: pointer; font-size: 13px; }
@@ -68,16 +72,19 @@
 <body>
   <header>
     <h1>Oneida County, NY — 911 activity heatmap</h1>
+    <span class="h-div" aria-hidden="true"></span>
     <label>From <input type="date" id="since" /></label>
     <label>To <input type="date" id="until" /></label>
-    <span style="display:flex;gap:6px">
-      <button class="ghost" data-days="1">Today</button>
-      <button class="ghost" data-days="7">7 days</button>
-      <button class="ghost active" data-days="30">30 days</button>
+    <span role="group" aria-label="Quick time windows" style="display:flex;gap:6px">
+      <button class="ghost" data-days="1" aria-pressed="false">Today</button>
+      <button class="ghost" data-days="7" aria-pressed="false">7 days</button>
+      <button class="ghost active" data-days="30" aria-pressed="true">30 days</button>
     </span>
+    <span class="h-div" aria-hidden="true"></span>
     <button id="update">Update map</button>
     <button id="copy-json" class="ghost" title="Copy the current window and filters as GeoJSON">Copy JSON</button>
     <button id="copy-csv" class="ghost" title="Copy the current window and filters as CSV">Copy CSV</button>
+    <span class="h-div" aria-hidden="true"></span>
     <button id="theme" class="ghost" title="Toggle light/dark basemap" aria-label="Toggle light or dark basemap">Dark</button>
     <details id="about"><summary>About this data</summary>
       <div class="panel">
@@ -411,7 +418,13 @@
         // data-days is the window in days inclusive of today: Today → 0 days back.
         document.getElementById('since').value = daysAgo(Math.max(Number(btn.dataset.days) - 1, 0));
         document.getElementById('until').value = daysAgo(0);
-        document.querySelectorAll('button[data-days]').forEach((b) => b.classList.toggle('active', b === btn));
+        // The .active highlight and aria-pressed stay one signal: both mirror "this
+        // button's window is applied", so screen readers hear the same state as eyes see.
+        document.querySelectorAll('button[data-days]').forEach((b) => {
+          const on = b === btn;
+          b.classList.toggle('active', on);
+          b.setAttribute('aria-pressed', String(on));
+        });
         syncUrl();
         update();
       });
