@@ -49,6 +49,8 @@
       <button class="ghost active" data-days="30">30 days</button>
     </span>
     <button id="update">Update map</button>
+    <button id="copy-json" class="ghost" title="Copy the current window and filters as GeoJSON">Copy JSON</button>
+    <button id="copy-csv" class="ghost" title="Copy the current window and filters as CSV">Copy CSV</button>
     <button id="theme" class="ghost" title="Toggle light/dark basemap" aria-label="Toggle light or dark basemap">Dark</button>
     <span id="status" role="status" aria-live="polite"></span>
     <span class="credit">Data: oneidacountyny.gov + ongov.net public feeds · open source</span>
@@ -220,6 +222,7 @@
         applyCategorySelection();
         syncChipStates();
         renderHeat();
+        syncUrl();
       });
       box.appendChild(reset);
       for (const [c, n] of sorted) {
@@ -239,6 +242,7 @@
           applyCategorySelection();
           syncChipStates();
           renderHeat();
+          syncUrl();
         });
         box.appendChild(chip);
       }
@@ -265,14 +269,16 @@
       if (all) { all.classList.toggle('on', selectedCat === null); all.setAttribute('aria-pressed', String(selectedCat === null)); }
     }
 
-    async function update() {
+    // silent=true is the background auto-refresh path: no "Loading…" flash and no
+    // map re-framing — renderHeat() alone refreshes the layers + freshness tick.
+    async function update(silent) {
       const statusEl = document.getElementById('status');
       const since = document.getElementById('since').value || undefined;
       const until = document.getElementById('until').value || undefined;
       const params = new URLSearchParams();
       if (since) params.set('since', since);
       if (until) params.set('until', until);
-      statusEl.textContent = 'Loading…';
+      if (!silent) statusEl.textContent = 'Loading…';
       try {
         const res = await fetch(`${API_URL}?${params.toString()}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -286,10 +292,13 @@
         buildChips();
         renderHeat();
         // Frame the view on visible counties only — a default-hidden county (T15) must
-        // not drag the initial viewport across the box toward it.
-        const pts = visibleFeatures().map((f) => [f.geometry.coordinates[1], f.geometry.coordinates[0]]);
-        if (pts.length) {
-          map.fitBounds(L.latLngBounds([Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1]))], [Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))]).pad(0.15));
+        // not drag the initial viewport across the box toward it. Skipped for silent
+        // auto-refreshes: they must not yank the user's pan around mid-read.
+        if (!silent) {
+          const pts = visibleFeatures().map((f) => [f.geometry.coordinates[1], f.geometry.coordinates[0]]);
+          if (pts.length) {
+            map.fitBounds(L.latLngBounds([Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1]))], [Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))]).pad(0.15));
+          }
         }
       } catch (err) {
         // Plain-language failure with a recovery path: the Update button retries.
@@ -301,8 +310,44 @@
       const d = new Date(Date.now() - n * 24 * 60 * 60 * 1000);
       return d.toISOString().slice(0, 10);
     }
-    document.getElementById('since').value = daysAgo(30);
-    document.getElementById('until').value = daysAgo(0);
+    // Shareability (P1-2): the window and filters round-trip through the query
+    // string so a link reproduces exactly what is on screen; theme stays out of
+    // the URL (it is per-browser). Reading here keeps defaults intact when a
+    // param is absent or not a valid date.
+    const paramsIn = new URLSearchParams(location.search);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(paramsIn.get('since') ?? '')) document.getElementById('since').value = paramsIn.get('since');
+    else document.getElementById('since').value = daysAgo(30);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(paramsIn.get('until') ?? '')) document.getElementById('until').value = paramsIn.get('until');
+    else document.getElementById('until').value = daysAgo(0);
+    selectedCat = ['police', 'fire', 'ems', 'other'].includes(paramsIn.get('category')) ? paramsIn.get('category') : null;
+    // counties lists the HIDDEN counties (mirrors syncUrl). Present → authoritative
+    // over the static markup defaults; absent → T15's default-off stands. An empty
+    // value is meaningful too: "the user re-enabled every county" must survive a
+    // shared link distinct from never having touched the toggles.
+    const countiesParam = paramsIn.get('counties');
+    let countiesTouched = countiesParam !== null;
+    if (countiesParam !== null) {
+      const known = new Set([...document.querySelectorAll('[data-county]')].map((b) => b.dataset.county));
+      hiddenCounties.clear();
+      for (const c of countiesParam.split(',').filter((c) => known.has(c))) hiddenCounties.add(c);
+    }
+
+    function syncUrl() {
+      // replaceState, not push: filter tweaks must not litter the back stack.
+      const q = new URLSearchParams();
+      const s = document.getElementById('since').value;
+      const u = document.getElementById('until').value;
+      if (s) q.set('since', s);
+      if (u) q.set('until', u);
+      if (selectedCat) q.set('category', selectedCat);
+      // Emit an empty value when the user touched the toggles and left nothing
+      // hidden — "all on" must round-trip, not collapse into T15's default-off.
+      if (countiesTouched || hiddenCounties.size) q.set('counties', [...hiddenCounties].join(','));
+      history.replaceState(null, '', `${location.pathname}${q.toString() ? `?${q}` : ''}`);
+    }
+    document.getElementById('since').addEventListener('change', () => { syncUrl(); update(); });
+    document.getElementById('until').addEventListener('change', () => { syncUrl(); update(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) syncUrl(); });
 
     // Quick time-window buttons: set the date inputs, then refresh in one click.
     document.querySelectorAll('button[data-days]').forEach((btn) => {
@@ -311,6 +356,7 @@
         document.getElementById('since').value = daysAgo(Math.max(Number(btn.dataset.days) - 1, 0));
         document.getElementById('until').value = daysAgo(0);
         document.querySelectorAll('button[data-days]').forEach((b) => b.classList.toggle('active', b === btn));
+        syncUrl();
         update();
       });
     });
@@ -342,12 +388,44 @@
       btn.addEventListener('click', () => {
         const c = btn.dataset.county;
         if (hiddenCounties.has(c)) hiddenCounties.delete(c); else hiddenCounties.add(c);
+        countiesTouched = true; // any manual toggle makes the URL authoritative over defaults
         buildChips();
         renderHeat();
+        syncUrl();
       });
     });
 
-    document.getElementById('update').addEventListener('click', update);
+    // Silent background refresh: the feed's ingest runs ~every 10 min, so poll at
+    // half that cadence without touching the map view or announcing "Loading…" —
+    // the status line just gets its freshness tick from renderHeat().
+    setInterval(() => { update(true); }, 5 * 60 * 1000);
+
+    // One-click export of exactly what is on screen (window + county/category
+    // filters) for journalists and analysts. Rows come from the in-memory fetch.
+    function visibleAsGeoJSON() {
+      return { type: 'FeatureCollection', features: visibleFeatures() };
+    }
+    function toCsv(geo) {
+      const esc = (v) => `"${String(v ?? '').replaceAll('"', '""')}"`;
+      const cols = ['county', 'type', 'title', 'lat', 'lng', 'lastSeenAt'];
+      const rows = geo.features.map((f) => [
+        f.properties.county, f.properties.type, f.properties.title,
+        f.geometry.coordinates[1], f.geometry.coordinates[0], f.properties.lastSeenAt,
+      ].map(esc).join(','));
+      return [cols.join(','), ...rows].join('\n');
+    }
+    async function copyText(text, label) {
+      try {
+        await navigator.clipboard.writeText(text);
+        document.getElementById('status').textContent = `Copied ${label} (${visibleFeatures().length} rows)`;
+      } catch {
+        document.getElementById('status').textContent = 'Copy failed — clipboard blocked by the browser';
+      }
+    }
+    document.getElementById('copy-json').addEventListener('click', () => copyText(JSON.stringify(visibleAsGeoJSON()), 'JSON'));
+    document.getElementById('copy-csv').addEventListener('click', () => copyText(toCsv(visibleAsGeoJSON()), 'CSV'));
+
+    document.getElementById('update').addEventListener('click', () => update());
     update();
   </script>
 </body>
