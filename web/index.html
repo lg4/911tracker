@@ -18,7 +18,8 @@
        keep ≥4.5:1 against each header background. */
     :root { --bg: #1c2330; --panel: #232b3a; --text: #e8ecf3; --muted: #aab4c5; --border: #3a4555; --accent: #2563eb; --error: #ef6b76; }
     body.light { --bg: #f2f5fa; --panel: #ffffff; --text: #1c2330; --muted: #5b6b82; --border: #cdd6e4; --error: #c1121f; }
-    header { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: var(--bg); color: var(--text); flex-wrap: wrap; }
+    /* position:relative anchors the absolutely-placed #about-panel to the header. */
+    header { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: var(--bg); color: var(--text); flex-wrap: wrap; position: relative; }
     header h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 600; }
     header label { font-size: 13px; color: var(--muted); }
     input[type=date] { padding: 4px 6px; border-radius: 4px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
@@ -31,8 +32,18 @@
        distinct state at a glance even while reading the map. */
     #status.error { color: var(--error); text-decoration: underline; text-underline-offset: 2px; }
     .credit { font-size: 12px; color: var(--muted); }
-    /* Category filter chips (T8): All + Police/Fire/EMS/Other pills with counts. */
-    #chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--border); }
+    /* T16 help surface: a header disclosure opens an absolutely-positioned panel
+       over the map without reflowing the wrapping header. */
+    #about summary { list-style: none; cursor: pointer; font-size: 12px; color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
+    #about[open] > summary::before { content: '▾ '; }
+    #about:not([open]) > summary::before { content: '▸ '; }
+    #about .panel { position: absolute; top: calc(100% + 4px); right: 14px; width: min(400px, calc(100vw - 28px)); background: var(--bg); border: 1px solid var(--border); padding: 10px 14px; z-index: 1100; }
+    #about .panel p { margin: 0 0 8px; font-size: 13px; line-height: 1.5; }
+    #legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; font-size: 12px; color: var(--text); }
+    /* Chip row bar; the trailing hint lives outside #chips because buildChips()
+       clears the box on every rebuild. */
+    #chipbar { display: flex; align-items: center; gap: 12px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--border); }
+    #chips { display: flex; flex-wrap: wrap; gap: 6px; }
     .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px dashed var(--border); background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
     .chip.on { border-style: solid; background: var(--panel); color: var(--text); }
     .chip .dot { width: 8px; height: 8px; border-radius: 50%; }
@@ -68,6 +79,13 @@
     <button id="copy-json" class="ghost" title="Copy the current window and filters as GeoJSON">Copy JSON</button>
     <button id="copy-csv" class="ghost" title="Copy the current window and filters as CSV">Copy CSV</button>
     <button id="theme" class="ghost" title="Toggle light/dark basemap" aria-label="Toggle light or dark basemap">Dark</button>
+    <details id="about"><summary>About this data</summary>
+      <div class="panel">
+        <p>Incidents are pulled from Oneida County's public CAD feed every ~10 minutes and shown as a density heatmap — brighter areas mean more reported activity, not individual calls.</p>
+        <div id="legend"></div>
+        <p><a href="https://github.com/lg4/911tracker/blob/main/docs/phase2.md" target="_blank" rel="noopener">How the data is collected &amp; stored</a></p>
+      </div>
+    </details>
     <span id="status" role="status" aria-live="polite"></span>
     <span class="credit">Data: oneidacountyny.gov + ongov.net public feeds · open source</span>
   </header>
@@ -78,7 +96,11 @@
          its points don't mean anything relative to an area; ingest keeps storing it. -->
     <button class="chip" data-county="onondaga" aria-pressed="false">Onondaga</button>
   </div>
-  <div id="chips" role="group" aria-label="Filter incident categories"></div>
+  <div id="chipbar">
+    <div id="chips" role="group" aria-label="Filter incident categories"></div>
+    <!-- T16: teaches the exclusive-select model; lives outside #chips since buildChips() clears it. -->
+    <span class="credit" style="margin-left:auto;white-space:nowrap">Click isolates · All resets</span>
+  </div>
   <div id="map"></div>
 
   <script src="vendor/leaflet.js"></script>
@@ -147,6 +169,21 @@
       if (CATEGORY_RX.police.test(text)) return 'police';
       return 'other';
     }
+
+    // T16: static legend inside the "About this data" panel — one colored dot per
+    // category so chip colors read as map colors without trial and error.
+    (function buildLegend() {
+      const box = document.getElementById('legend');
+      for (const c of CATS) {
+        const item = document.createElement('span');
+        item.style.cssText = 'display:inline-flex;align-items:center;gap:5px;margin-right:10px';
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        dot.style.background = c.color;
+        item.append(dot, ` ${c.label}`);
+        box.appendChild(item);
+      }
+    })();
 
     let heatLayers = []; // one L.heatLayer per visible category
     // Cap the layer max low so clusters saturate through the gradient while isolated
