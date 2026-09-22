@@ -14,8 +14,10 @@
     /* Panning beyond the local tile pyramid shows this "no coverage" fill
        instead of a broken white void. */
     .leaflet-container { background: #d7e3ee; }
-    :root { --bg: #1c2330; --panel: #232b3a; --text: #e8ecf3; --muted: #aab4c5; --border: #3a4555; --accent: #2563eb; }
-    body.light { --bg: #f2f5fa; --panel: #ffffff; --text: #1c2330; --muted: #5b6b82; --border: #cdd6e4; }
+    /* --error tints the shared fire data hue (#e63946) per theme so failures
+       keep ≥4.5:1 against each header background. */
+    :root { --bg: #1c2330; --panel: #232b3a; --text: #e8ecf3; --muted: #aab4c5; --border: #3a4555; --accent: #2563eb; --error: #ef6b76; }
+    body.light { --bg: #f2f5fa; --panel: #ffffff; --text: #1c2330; --muted: #5b6b82; --border: #cdd6e4; --error: #c1121f; }
     header { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: var(--bg); color: var(--text); flex-wrap: wrap; }
     header h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 600; }
     header label { font-size: 13px; color: var(--muted); }
@@ -25,6 +27,9 @@
     button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
     button.ghost.active { color: var(--text); border-color: var(--accent); }
     #status { font-size: 13px; color: var(--muted); min-width: 90px; }
+    /* Static shift only — color + underline, no motion — so failure reads as a
+       distinct state at a glance even while reading the map. */
+    #status.error { color: var(--error); text-decoration: underline; text-underline-offset: 2px; }
     .credit { font-size: 12px; color: var(--muted); }
     /* Category filter chips (T8): All + Police/Fire/EMS/Other pills with counts. */
     #chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--border); }
@@ -291,6 +296,7 @@
         }));
         buildChips();
         renderHeat();
+        statusEl.classList.remove('error'); // a successful fetch clears any prior failure styling
         // Frame the view on visible counties only — a default-hidden county (T15) must
         // not drag the initial viewport across the box toward it. Skipped for silent
         // auto-refreshes: they must not yank the user's pan around mid-read.
@@ -301,7 +307,9 @@
           }
         }
       } catch (err) {
-        // Plain-language failure with a recovery path: the Update button retries.
+        // Plain-language failure with a recovery path: the Update button retries;
+        // the error class makes the line visually distinct from normal ticks.
+        statusEl.classList.add('error');
         statusEl.textContent = `Couldn't load incidents (${err.message}) — hit "Update map" to retry`;
       }
     }
