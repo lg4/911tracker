@@ -41,6 +41,17 @@
          the dark app chrome without any second tile set or external service. */
       filter: invert(1) hue-rotate(200deg) brightness(.9) contrast(.9);
     }
+    /* P2-5 mobile ergonomics: at touch sizes every control gets a ≥40px tap
+       target (chips, date inputs, buttons) — desktop sizing is untouched. */
+    @media (max-width: 720px) {
+      button, input[type=date] { min-height: 40px; }
+      .chip { padding-top: 6px; padding-bottom: 6px; }
+    }
+    /* Collapse the credit line on very small phones so "Update map" stays above
+       the fold in the wrapping header. */
+    @media (max-width: 360px) {
+      .credit { display: none; }
+    }
   </style>
 </head>
 <body>
