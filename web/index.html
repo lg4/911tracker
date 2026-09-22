@@ -28,8 +28,8 @@
     .credit { font-size: 12px; color: var(--muted); }
     /* Category filter chips (T8): All + Police/Fire/EMS/Other pills with counts. */
     #chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--border); }
-    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px dashed var(--border); background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; text-decoration: line-through; }
-    .chip.on { border-style: solid; background: var(--panel); color: var(--text); text-decoration: none; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px dashed var(--border); background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+    .chip.on { border-style: solid; background: var(--panel); color: var(--text); }
     .chip .dot { width: 8px; height: 8px; border-radius: 50%; }
     body.dark .leaflet-tile {
       /* Darken the local OSM tiles with a pure-CSS transform so the map matches
@@ -141,7 +141,9 @@
     }
 
     let allFeatures = [];
-    const hiddenCats = new Set();
+    let presentCats = []; // categories in the current window (built by buildChips)
+    let selectedCat = null; // exclusive-select state: null = All visible
+    let hiddenCats = new Set();
     // T11 toggles above the type chips; initial on/off comes from the static markup
     // (T15 ships Onondaga off by default) rather than assuming everything visible.
     const hiddenCounties = new Set([...document.querySelectorAll('[data-county]')].filter((b) => !b.classList.contains('on')).map((b) => b.dataset.county));
@@ -201,19 +203,21 @@
         btn.disabled = !presentCounties.has(btn.dataset.county);
       });
       buildCountyToggles();
-      const counts = new Map();
-      hiddenCats.clear();
       // Counts are per-category over the currently-visible counties.
+      const counts = new Map();
       for (const f of visibleFeatures()) counts.set(classify(f), (counts.get(classify(f)) ?? 0) + 1);
       const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+      presentCats = sorted.map(([c]) => c);
+      applyCategorySelection();
       if (!sorted.length) return;
       const shownNow = visibleFeatures().length;
       const reset = document.createElement('button');
-      reset.className = 'chip on';
+      reset.className = 'chip';
       reset.id = 'chip-all';
       reset.textContent = `All (${shownNow})`;
       reset.addEventListener('click', () => {
-        hiddenCats.clear();
+        selectedCat = null;
+        applyCategorySelection();
         syncChipStates();
         renderHeat();
       });
@@ -221,31 +225,44 @@
       for (const [c, n] of sorted) {
         const meta = CATS.find((x) => x.key === c);
         const chip = document.createElement('button');
-        chip.className = 'chip on';
+        chip.className = 'chip';
         chip.dataset.type = c;
         chip.title = `${n} incident${n === 1 ? '' : 's'}`;
         const dot = document.createElement('span');
         dot.className = 'dot';
         dot.style.background = meta.color;
         chip.append(dot, ` ${meta.label} (${n})`);
-        chip.setAttribute('aria-pressed', 'true');
+        // Exclusive select: clicking isolates that category (the only one left
+        // visible); clicking the already-isolated chip again returns to All.
         chip.addEventListener('click', () => {
-          hiddenCats.has(c) ? hiddenCats.delete(c) : hiddenCats.add(c);
+          selectedCat = selectedCat === c ? null : c;
+          applyCategorySelection();
           syncChipStates();
           renderHeat();
         });
         box.appendChild(chip);
       }
+      syncChipStates();
+    }
+
+    // The single writer of hiddenCats — chip clicks and All reset route through here
+    // too; a direct .add/.delete elsewhere would be silently overwritten on next buildChips().
+    function applyCategorySelection() {
+      // The previous selection survives refetches like county visibility does:
+      // keep it when its category is still in the window, else fall back to all-visible.
+      if (selectedCat && !presentCats.includes(selectedCat)) selectedCat = null;
+      hiddenCats = new Set(presentCats.filter((c) => c !== selectedCat));
     }
 
     function syncChipStates() {
       document.getElementById('chips').querySelectorAll('.chip[data-type]').forEach((c) => {
-        const visible = !hiddenCats.has(c.dataset.type);
-        c.classList.toggle('on', visible);
-        c.setAttribute('aria-pressed', String(visible));
+        // aria-pressed mirrors "is this the sole visible category", not "hidden".
+        const isolated = selectedCat === c.dataset.type;
+        c.classList.toggle('on', isolated);
+        c.setAttribute('aria-pressed', String(isolated));
       });
       const all = document.getElementById('chip-all');
-      if (all) { all.classList.toggle('on', hiddenCats.size === 0); all.setAttribute('aria-pressed', String(hiddenCats.size === 0)); }
+      if (all) { all.classList.toggle('on', selectedCat === null); all.setAttribute('aria-pressed', String(selectedCat === null)); }
     }
 
     async function update() {
@@ -318,11 +335,14 @@
 
     // T11 county toggles: hide/show an entire county's incidents without re-fetching;
     // type chips above already respect the same hiddenCounties set via visibleFeatures().
+    // Rebuild chips (not just toggle state) so per-category counts and the exclusive-select
+    // highlight track what is actually left after a county is hidden — isolating Fire then
+    // hiding its only county must not leave a highlighted chip claiming rows that are gone.
     document.querySelectorAll('[data-county]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const c = btn.dataset.county;
         if (hiddenCounties.has(c)) hiddenCounties.delete(c); else hiddenCounties.add(c);
-        buildCountyToggles();
+        buildChips();
         renderHeat();
       });
     });
