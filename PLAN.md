@@ -48,6 +48,20 @@ Terraform outputs: `function_app_name/url`, `tables_endpoint`, `tables_connectio
 - Committed: all of the above incl. `docs/phase2.md` M5 section, `functions/host.json`, `web/staticwebapp.config.json`.
 - **Self-contained central-NY map** (commit `547fc47`): vendored Leaflet 1.9.4 + leaflet-heat into `web/vendor/`; pre-rendered bounded Carto dark tile pyramid (central-NY box ~42.8–43.6N / −76.6..−75.0W, z7–z12 = 388 PNGs) into `web/tiles/{z}/{x}/{y}.png`; rewrote `web/index.html` to local assets + local `L.tileLayer('/tiles/...')` with `maxBounds` + no world wrap. Deploy-web green; verified live (all assets 200). Render script kept at `/tmp/opencode/render_tiles.py` (re-run idempotent if tiles ever need regenerating).
 
+## Impeccable critique — web/index.html fixes (chosen this session; NOT yet started)
+
+From `/impeccable critique web/` (run `web-index-html` @ 2026-09-21T21-58-52Z, score **27/40** up from prior 20/40). Snapshot: `.impeccable/critique/2026-09-21T21-58-52Z__web-index-html.md`. User confirmed all three decisions below. All changes land in `web/index.html` (+ `web/config.js` only if needed), doctrine-safe per DESIGN.md (no shadow/motion/webfont; category hues as signal only).
+
+**Per-task commits + ai-review before each push for CI deploy (user's explicit rule).** Suggested command territory = `/impeccable polish`; re-run `/impeccable critique web/` afterward to confirm >27 holds.
+
+- [ ] **P1-1 → exclusive-select chips.** Click a chip = show ONLY that category; `All` resets to all-visible; drop the strikethrough hide encoding; update `aria-pressed` so it mirrors "is this the sole visible category" (not "hidden"). Every common resident query becomes one tap.
+- [ ] **P1-2 → full shareability stack.** (a) Sync `since/until/category/counties` into URL query params and read them back on load; (b) silent ~5-min auto-refetch with a status-line tick (respect existing `aria-live` region); (c) one-click **Copy JSON / CSV** of the current window+filters using the live GeoJSON data already in memory. Serves the journalist audience (Mara).
+- [ ] **P1-3 → preserve category filters across refetches.** Stop `buildChips()` from unconditionally calling `hiddenCats.clear()` — keep hidden categories when they still exist in the new window, matching how county visibility already survives. (Bundled with P1-1.)
+- [ ] **P2-4 → make errors visually distinct.** Add an error class shifting color/border statically (no motion) so failure text no longer reads as healthy muted status. Reuse fire-red hue as signal.
+- [ ] **P2-5 → mobile ergonomics.** Add a breakpoint: bump control padding/tap height to ≥40px for chips (~24px), date inputs (~26px), buttons (~28px); collapse the credit line at 360px widths so "Update map" isn't pushed below the fold before the map.
+
+Order suggestion: P1-1 + P1-3 together (same chip code path) → P1-2 → P2-4 → P2-5. Each is its own commit; ai-review before pushing each for CI deploy.
+
 ## Open / next steps (in order)
 
 ### 1. ~~Functions "malformed content" sync failure~~ — **DONE** (see .tasks.md T1/UNBRICK: root cause was empty `linuxFxVersion`, fixed via REST PUT `node|22`; deploy-functions.yml green; endpoint live with GeoJSON + pinned CORS).
@@ -74,8 +88,7 @@ DECISIONS CONFIRMED (user): interactive Leaflet tile-pyramid (keep pan/zoom); re
 
 > Restart-safe handoff. Statuses as of last update this session. §3 below is DONE; remove from list when renumbering.
 
-- [ ] **HIGH** Functions "malformed content" sync failure (§1) — BLOCKER for function deploys. Fresh run `35455884828` failed again even after `az webapp restart`. Next: pull full logs (`gh run view 35455884828 --log`), inspect deployed `wwwroot` layout via Kudu publishing profile (`az webapp deployment list-publishing-profiles -g oneida911 -n o911func-e10tr1`; Kudu `/api/vfs/site/wwwroot/` was returning "service unavailable" earlier — retry warm). Suspects: functions-action zip nesting, node ~4 worker expectations on consumption, stale partial deploys. Once green → verify live `curl https://o911func-e10tr1.azurewebsites.net/api/incidents?since=...`.
-- [ ] **MED** ALLOWED_ORIGIN fix (§2): `infra/main.tf:50` → use `azurerm_static_web_app.web.default_host_name` (currently the name-derived host which 404s); `terraform apply`; confirm app setting = `https://salmon-smoke-0f761930f.5.azurestaticapps.net`. Needed before CORS works from real map origin.
+- [ ] **HIGH** Impeccable critique fixes on `web/index.html` (P1-1 exclusive chips + P1-3 reset fix → P1-2 share/refresh/export → P2-4 error color → P2-5 mobile targets). Details + order under **Impeccable critique** above; per-task commits with ai-review before each push for CI deploy. §1 malformed-content and §2 ALLOWED_ORIGIN are DONE/not-needed (see lines above) — no duplicate entries kept here.
 - [x] **MED** Self-contained central-NY map (§3) — DONE this session (see Done-this-session bullet + commit `547fc47`).
 - [x] **MED** ~~Verify ingest end-to-end~~ — DONE this session: `meta.last_poll` advanced to 2026-09-21T00:40Z (added:1, fetched:9); `/api/incidents` returns live GeoJSON + pinned CORS header. Ingest runs fully from the Azure function app → Table Storage; no local container/Postgres in the path.
 - [ ] **LOW** AI subagent review of both live endpoints (functions + web) — §5, run after each completed to-do.
