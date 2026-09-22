@@ -76,9 +76,9 @@
     <label>From <input type="date" id="since" /></label>
     <label>To <input type="date" id="until" /></label>
     <span role="group" aria-label="Quick time windows" style="display:flex;gap:6px">
-      <button class="ghost" data-days="1" aria-pressed="false">Today</button>
-      <button class="ghost" data-days="7" aria-pressed="false">7 days</button>
-      <button class="ghost active" data-days="30" aria-pressed="true">30 days</button>
+      <button class="ghost" data-days="1">Today</button>
+      <button class="ghost" data-days="7">7 days</button>
+      <button class="ghost active" data-days="30">30 days</button>
     </span>
     <span class="h-div" aria-hidden="true"></span>
     <button id="update">Update map</button>
@@ -423,6 +423,12 @@
     document.getElementById('since').addEventListener('change', () => { syncUrl(); update(); });
     document.getElementById('until').addEventListener('change', () => { syncUrl(); update(); });
     document.addEventListener('visibilitychange', () => { if (!document.hidden) syncUrl(); });
+
+    // Mirror the initial .active state into aria-pressed so the static HTML's
+    // default window can never desync from what assistive tech announces.
+    document.querySelectorAll('button[data-days]').forEach((b) => {
+      b.setAttribute('aria-pressed', String(b.classList.contains('active')));
+    });
 
     // Quick time-window buttons: set the date inputs, then refresh in one click.
     document.querySelectorAll('button[data-days]').forEach((btn) => {
