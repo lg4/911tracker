@@ -127,11 +127,11 @@
     // Leaflet + locally stored basemap tiles) so no external tile/CDN calls.
     const BOUNDS = [[42.8, -76.6], [43.6, -75.0]];
 
-    // Partial viscosity resists panning past the covered box mid-drag and lets
-    // a drag briefly peek in from the edge; on release the view settles back in-bounds.
+    // No maxBounds: at zoom 9 a wide viewport already exceeds BOUNDS' east edge,
+    // so enforcing it made Leaflet slide the post-load view toward the box center
+    // (between the two counties) — the "snap back" users reported. Panning is
+    // free; min/maxZoom keep the view within the tile pyramid's coverage anyway.
     const map = L.map('map', {
-      maxBounds: BOUNDS,
-      maxBoundsViscosity: 0.5,
       worldCopyJump: false,
       minZoom: 7,
       maxZoom: 14,
