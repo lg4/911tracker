@@ -38,10 +38,16 @@
     .credit { font-size: 12px; color: var(--muted); }
     /* T16 help surface: a header disclosure opens an absolutely-positioned panel
        over the map without reflowing the wrapping header. */
-    #about summary { list-style: none; cursor: pointer; font-size: 12px; color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
-    #about[open] > summary::before { content: '▾ '; }
-    #about:not([open]) > summary::before { content: '▸ '; }
-    #about .panel { position: absolute; top: calc(100% + 4px); right: 14px; width: min(400px, calc(100vw - 28px)); background: var(--bg); border: 1px solid var(--border); padding: 10px 14px; z-index: 1100; }
+    /* T23: shared disclosure styling for header menus (#more / #about) — a small
+       underlined label that opens an absolutely-positioned panel over the map. */
+    .menu { position: relative; }
+    .menu summary { list-style: none; cursor: pointer; font-size: 12px; color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
+    .menu[open] > summary::before { content: '▾ '; }
+    .menu:not([open]) > summary::before { content: '▸ '; }
+    .menu .panel { position: absolute; top: calc(100% + 4px); background: var(--bg); border: 1px solid var(--border); padding: 10px 14px; z-index: 1100; }
+    #more .panel { right: 0; display: flex; flex-direction: column; gap: 6px; min-width: 220px; max-width: calc(100vw - 56px); }
+    #more button { align-self: stretch; text-align: left; }
+    #about .panel { right: 14px; width: min(400px, calc(100vw - 28px)); }
     #about .panel p { margin: 0 0 8px; font-size: 13px; line-height: 1.5; }
     #legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; font-size: 12px; color: var(--text); }
     /* Chip row bar; the trailing hint lives outside #chips because buildChips()
@@ -82,10 +88,16 @@
     </span>
     <span class="h-div" aria-hidden="true"></span>
     <button id="update">Update map</button>
-    <button id="copy-json" class="ghost" title="Copy the current window and filters as GeoJSON">Copy JSON</button>
-    <button id="copy-csv" class="ghost" title="Copy the current window and filters as CSV">Copy CSV</button>
-    <span class="h-div" aria-hidden="true"></span>
-    <button id="theme" class="ghost" title="Toggle light/dark basemap" aria-label="Toggle light or dark basemap">Dark</button>
+    <!-- T23: secondary actions tucked behind one More menu so the header stays
+         compact; the panel mirrors #about's absolutely-positioned disclosure. -->
+    <details class="menu" id="more">
+      <summary>More</summary>
+      <div class="panel">
+        <button id="copy-json" class="ghost" title="Copy the current window and filters as GeoJSON">Copy visible rows as JSON</button>
+        <button id="copy-csv" class="ghost" title="Copy the current window and filters as CSV">Copy visible rows as CSV</button>
+        <button id="theme" class="ghost" title="Toggle light/dark basemap" aria-label="Toggle light or dark basemap">Dark</button>
+      </div>
+    </details>
     <details id="about"><summary>About this data</summary>
       <div class="panel">
         <p>Incidents are pulled from Oneida County's public CAD feed every ~10 minutes and shown as a density heatmap — brighter areas mean more reported activity, not individual calls.</p>
