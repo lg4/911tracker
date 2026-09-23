@@ -296,7 +296,8 @@ test('upserted rows carry tick provenance; lastStatusChangeAt only on divergence
 
   // Re-polls always carry the tick's provenance tags (pollSource adds them), so they
   // survive Replace-mode upserts without wiping step 1's checksum.
-  const tagged = () => incident({ tickChecksum: 'abc123def456', fetchedAtIso: '2026-09-10T12:00:00.000Z' });
+  const tagged = (overrides = {}) =>
+    incident({ ...{ tickChecksum: 'abc123def456', fetchedAtIso: '2026-09-10T12:00:00.000Z' }, ...overrides });
 
   // Same status re-poll: still no flag.
   await upsertIncidents(clients, [tagged()], '2026-09-10T12:10:00.000Z');
@@ -311,6 +312,13 @@ test('upserted rows carry tick provenance; lastStatusChangeAt only on divergence
   const rowB = bs.tables.get('incidents').get(`${partKey}\u0000ID:42`);
   assert.equal(rowB.status, 'Resolved');
   assert.equal(rowB.lastStatusChangeAt, '2026-09-10T12:20:00.000Z');
+
+  // Same-status re-poll after the change must not erase the flag (Replace-mode wipe).
+  await upsertIncidents(clients, [tagged({ status: 'Resolved' })], '2026-09-10T12:30:00.000Z');
+  const rowC = bs.tables.get('incidents').get(`${partKey}\u0000ID:42`);
+  assert.equal(rowC.status, 'Resolved');
+  assert.equal(rowC.lastStatusChangeAt, '2026-09-10T12:20:00.000Z');
+  assert.equal(rowC.pollCount, 4);
 
   // Served features surface all three provenance fields.
   const geo = await fetchRange(clients, { since: '2026-09-01T00:00:00Z', until: '2026-09-30T00:00:00Z' });

@@ -145,8 +145,11 @@ export async function upsertIncidents(clients, incidents, nowIso, opts = {}) {
     // Primary write goes to the current-month partition (queries default to recent months).
     // T12(a): stamp when this row's status last diverged from its stored state so a served
     // feature can be flagged "status changed after storage" without re-reading history.
+    // Replace-mode writes wipe fields absent from the new record, so an unchanged-status
+    // re-poll must carry forward the previously stored flag instead of erasing it.
+    const lastStatusChangeAt = statusChanged && existing ? nowIso : existing?.lastStatusChangeAt;
     const primary = toEntity(
-      { ...inc, lastSeenAt: nowIso, ...(statusChanged && existing ? { lastStatusChangeAt: nowIso } : {}) },
+      { ...inc, lastSeenAt: nowIso, ...(lastStatusChangeAt != null ? { lastStatusChangeAt } : {}) },
       {
         partitionKey: curMonth,
         firstSeenAt,
