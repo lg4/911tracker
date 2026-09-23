@@ -14,7 +14,28 @@ const TILE = (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
 const SW = { lat: 42.8, lng: -76.6 };
 const NE = { lat: 43.6, lng: -75.0 };
 const ZMIN = 7;
-const ZMAX = 14; // was 12; user wants finer detail (T9)
+const ZMAX = 15; // T33: full county through z14; z15 deepened ONLY around Utica + Rome (below).
+// T33 selective z15: two small windows instead of the whole county — a single box would
+// span nearly all of Oneida anyway (the towns sit ~80km apart), which defeats "only".
+// Each window is a square of FOCUS_RADIUS tiles on each side of the town center (~15km
+// across at z15, where one tile ≈ 0.9km); the rest of the county keeps its z14 ceiling.
+const FOCUS_CENTERS = [
+  { name: 'Utica', lat: 43.079, lng: -75.164 },
+  { name: 'Rome', lat: 43.113, lng: -75.458 },
+];
+const FOCUS_RADIUS = 8;
+function focusTiles(z) {
+  const out = new Set();
+  for (const c of FOCUS_CENTERS) {
+    const t = tileXY(c.lat, c.lng, z);
+    for (let x = t.x - FOCUS_RADIUS; x <= t.x + FOCUS_RADIUS; x++) {
+      for (let y = t.y - FOCUS_RADIUS; y <= t.y + FOCUS_RADIUS; y++) {
+        if (x >= 0 && y >= 0 && x < 2 ** z && y < 2 ** z) out.add(`${z}/${x}/${y}`);
+      }
+    }
+  }
+  return out;
+}
 // A little breathing room beyond the box edge so panning near it doesn't hit
 // a gap before maxBoundsViscosity pulls back.
 const PAD = 1;
@@ -53,7 +74,12 @@ async function fetchTile(url, file) {
 (async () => {
   const jobs = new Set();
   for (let z = ZMIN; z <= ZMAX; z++) {
-    // SW corner → min-x / max-y ; NE corner → max-x / min-y.
+    if (z >= 15) {
+      // T33 selective deepening: only the Utica + Rome windows at this level.
+      for (const k of focusTiles(z)) jobs.add(k);
+      continue;
+    }
+    // Full county box through z14 — SW corner → min-x / max-y ; NE → max-x / min-y.
     const sw = tileXY(SW.lat, SW.lng, z);
     const ne = tileXY(NE.lat, NE.lng, z);
     // Pad in tile-index space so the box edge has breathing room on all sides.

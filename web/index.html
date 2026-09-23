@@ -165,7 +165,7 @@
     const map = L.map('map', {
       worldCopyJump: false,
       minZoom: 7,
-      maxZoom: 14,
+      maxZoom: 15, // T33: z15 exists only around Utica/Rome; elsewhere the pyramid tops out at z14 (blank past it)
     });
     // Starts and stays centered on Utica: T24 removed the Onondaga toggle and the
     // initial-load fitBounds snap with it, so fetches never move the view.
@@ -181,8 +181,8 @@
     L.tileLayer('/tiles/{z}/{x}/{y}.png', {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
       minZoom: 7,
-      maxNativeZoom: 14, // pyramid now covers z7-z14 (T9)
-      maxZoom: 14,
+      maxNativeZoom: 15, // T33: z7-z14 full county; z15 only around Utica/Rome (blank elsewhere)
+      maxZoom: 15,
       bounds: BOUNDS,
       noWrap: true,
     }).addTo(map);
@@ -224,7 +224,7 @@
     let iconLayer = null; // T32: L.layerGroup of per-incident markers, shown only AT MAX_ZOOM (heat below)
     // T32: handoff sits at the tile/map ceiling so the heat layer is the sole representation at
     // every zoom below max — no dots riding over the wash mid-zoom (T28's always-on recent set is gone).
-    const MAX_ZOOM = 14; // must match map + tile-layer maxZoom above
+    const MAX_ZOOM = 15; // T33: must match map + tile-layer maxZoom above (z15 selective around Utica/Rome)
     let presentCats = []; // categories in the current window (built by buildChips)
     let selectedCat = null; // exclusive-select state: null = All visible
     let hiddenCats = new Set();
