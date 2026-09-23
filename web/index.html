@@ -156,6 +156,9 @@
       noWrap: true,
     }).addTo(map);
 
+    // T30: swap heat ↔ per-incident icons as the user crosses ICON_ZOOM.
+    map.on('zoomend', applyZoomMode);
+
     // Incident categories (T8): raw feed types are far too varied and numerous to show
     // as chips individually, so classify each incident into one of these for filtering
     // and heat coloring. Keyword rules over type+title; unmatched → other.
@@ -222,6 +225,8 @@
     }
 
     let allFeatures = [];
+    let iconLayer = null; // T30: L.layerGroup of per-incident markers, shown at/beyond ICON_ZOOM
+    const ICON_ZOOM = 12; // heat reads as density below this; street-level icons take over above it
     let presentCats = []; // categories in the current window (built by buildChips)
     let selectedCat = null; // exclusive-select state: null = All visible
     let hiddenCats = new Set();
@@ -246,6 +251,7 @@
         // category visible they simply stack in their own hue.
         heatLayers.push(L.heatLayer(pts, { radius: 34, blur: 28, maxZoom: 9, max: HEAT_MAX, gradient: gradientFor(CATS.find((x) => x.key === c).color) }).addTo(map));
       }
+      renderIcons();
       const shown = [...byCat.values()].reduce((n, a) => n + a.length, 0);
       // Freshness (T12 trust signal): newest lastSeenAt across visible rows, human-readable.
       let latest = null;
@@ -263,6 +269,42 @@
       // tab shows its data age without stealing the full status line.
       const baseTitle = 'Oneida County 911 Activity Map';
       document.title = latest ? `${baseTitle} · updated ${new Date(latest.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : baseTitle;
+    }
+
+    // T30: past ICON_ZOOM the per-category heat washes stop being meaningful at street
+    // scale — swap them for one colored circleMarker per incident so each event reads as
+    // a point on its own address. Below the threshold the markers stay hidden so dense
+    // areas keep their density signal rather than collapsing into an unreadable blob of dots.
+    const iconMarkers = new Map(); // category → L.circleMarker[]
+    function renderIcons() {
+      if (iconLayer) map.removeLayer(iconLayer);
+      iconMarkers.clear();
+      // Built detached; applyZoomMode() decides whether it sits on the map at this zoom.
+      iconLayer = L.layerGroup();
+      for (const f of visibleFeatures()) {
+        const c = classify(f);
+        if (hiddenCats.has(c)) continue;
+        const [lng, lat] = f.geometry.coordinates;
+        m_addIcon(lat, lng, c, f.properties);
+      }
+      applyZoomMode();
+    }
+
+    function m_addIcon(lat, lng, c, props) {
+      const color = CATS.find((x) => x.key === c).color;
+      const m = L.circleMarker([lat, lng], { radius: 6, color, weight: 1.5, fillColor: color, fillOpacity: 0.85 });
+      m.bindPopup(`<b>${c.toUpperCase()}</b><br>${props.title || props.type || ''}<br><small>${(props.lastSeenAt || '').replace('T', ' ').slice(0, 16)}</small>`);
+      if (!iconMarkers.has(c)) iconMarkers.set(c, []);
+      iconMarkers.get(c).push(m.addTo(iconLayer));
+    }
+
+    // T30: heat is the density view below ICON_ZOOM; per-incident icons take over at/above it.
+    // Both layers stay built — this only toggles which one sits on the map, so zooming back
+    // in never leaves an empty map (the group persists across mode swaps).
+    function applyZoomMode() {
+      const showIcons = map.getZoom() >= ICON_ZOOM;
+      for (const l of heatLayers) map[showIcons ? 'removeLayer' : 'addLayer'](l);
+      if (iconLayer) map[showIcons ? 'addLayer' : 'removeLayer'](iconLayer);
     }
 
     function buildChips() {
