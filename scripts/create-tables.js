@@ -27,7 +27,7 @@ if (cs.includes(';')) {
 const credential = accountName && accountKey ? new AzureNamedKeyCredential(accountName, accountKey) : undefined;
 const svc = credential ? new TableServiceClient(endpoint, credential) : new TableServiceClient(endpoint);
 
-for (const name of ['incidents', 'statusHistory', 'meta']) {
+for (const name of ['incidents', 'statusHistory', 'meta', 'incidentsArchive', 'statusHistoryArchive']) {
   try {
     await svc.createTable(name);
     console.log(`created ${name}`);

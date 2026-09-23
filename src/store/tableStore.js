@@ -25,13 +25,26 @@ function parseConnectionString(cs) {
   return { url: `${proto}://${account}.table.core.windows.net`, credential: new AzureNamedKeyCredential(account, key) };
 }
 
+// T12(b): mirror-table backup lane lives in the SAME storage account (no new service/tier),
+// so a table-level loss or an app-side bug can be restored from the archive without touching
+// infra. Availability-level durability against a full-account outage is a separate concern —
+// see docs/runbook.md ("Durability") for the LRS→GRS recommendation.
+const ARCHIVE_TABLES = { incidents: 'incidentsArchive', statusHistory: 'statusHistoryArchive' };
+
 export function createTableClients(connectionString, opts = {}) {
   if (!connectionString) throw new Error('missing Azure tables connection string');
   const { url } = parseConnectionString(connectionString);
   // Bare dev endpoints (Azurite) carry no key; pass a credential explicitly in that case.
   const credential = opts.credential ?? parseConnectionString(connectionString).credential;
   const make = (name) => (credential ? new TableClient(url, name, credential) : new TableClient(url, name));
-  return { incidents: make('incidents'), statusHistory: make('statusHistory'), meta: make('meta') };
+  return {
+    incidents: make('incidents'),
+    statusHistory: make('statusHistory'),
+    meta: make('meta'),
+    // T12(b): mirror-table backup lane targets in the same storage account.
+    incidentsArchive: make(ARCHIVE_TABLES.incidents),
+    statusHistoryArchive: make(ARCHIVE_TABLES.statusHistory),
+  };
 }
 
 export function monthOf(iso) {
@@ -409,4 +422,46 @@ export async function recordTickFailure(clients, message) {
     lastErrorMessage: String(message).slice(0, 500),
     errors: count,
   });
+}
+
+// --- T12(b): mirror-table backup lane ------------------------------------------
+// Copies every row of incidents + status_history into sibling archive tables in the SAME
+// storage account. The copy is a full Replace per row (idempotent — re-running is safe);
+// the archive never feeds back into the read path, so it can only lag, never corrupt live
+// data. A wall-clock budget keeps one run inside the function timeout; aborting is fine
+// because the next hourly tick re-copies everything idempotently.
+
+export async function copyTableToArchive(clients, srcClient, dstClient, nowIso, opts = {}) {
+  const deadlineMs = Date.now() + (opts.budgetMs ?? 4 * 60 * 1000);
+  let copied = 0;
+  for await (const e of srcClient.listEntities({})) {
+    if (Date.now() > deadlineMs) break; // partial this round; next tick resumes idempotently
+    const { _etag, etag, ...entity } = e;
+    await dstClient.upsertEntity(entity, 'Replace');
+    copied += 1;
+  }
+  return { copied };
+}
+
+// Mirror both data tables and stamp a pointer row so freshness of the backup itself is
+// observable (a stale last_backup is exactly the failure we're guarding against).
+export async function backupDataTables(clients, nowIso, opts = {}) {
+  const incidents = await copyTableToArchive(clients, clients.incidents, clients.incidentsArchive, nowIso, opts);
+  const statusHistory = await copyTableToArchive(clients, clients.statusHistory, clients.statusHistoryArchive, nowIso, opts);
+  await recordBackupSuccess(clients, { ts: nowIso, incidents: incidents.copied, statusHistory: statusHistory.copied });
+  return { incidents: incidents.copied, statusHistory: statusHistory.copied };
+}
+
+export async function recordBackupSuccess(clients, stats) {
+  await upsertReplace(clients.meta, {
+    partitionKey: 'meta',
+    rowKey: 'last_backup',
+    ts: stats.ts ?? new Date().toISOString(),
+    incidents: Number(stats.incidents ?? 0),
+    statusHistory: Number(stats.statusHistory ?? 0),
+  });
+}
+
+export async function latestBackup(clients) {
+  return getRow(clients.meta, 'meta', 'last_backup');
 }

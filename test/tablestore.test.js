@@ -10,6 +10,10 @@ import {
   recordTickProvenance,
   latestTick,
   assessFreshness,
+  copyTableToArchive,
+  backupDataTables,
+  recordBackupSuccess,
+  latestBackup,
 } from '../src/store/tableStore.js';
 
 // --- in-memory stand-in for @azure/data-tables TableClient -------------------
@@ -128,6 +132,9 @@ function clientsFrom(backstore) {
     incidents: backstore.clientFor('incidents'),
     statusHistory: backstore.clientFor('status_history'),
     meta: backstore.clientFor('meta'),
+    // T12(b): mirror-table backup lane targets (same naming convention as production).
+    incidentsArchive: backstore.clientFor('incidentsArchive'),
+    statusHistoryArchive: backstore.clientFor('statusHistoryArchive'),
   };
 }
 
@@ -394,4 +401,87 @@ test('fetchRange applies day-granular since/until inside month partitions', asyn
     until: new Date('2026-03-19'),
   });
   assert.deepEqual(geo.features.map((f) => f.properties.dedupKey), ['ID:52']);
+});
+
+// --- T12(b): mirror-table backup lane ------------------------------------------
+
+test('backup copies every incident row into the archive table', async () => {
+  const bs = makeFakeBackstore();
+  const clients = clientsFrom(bs);
+  await upsertIncidents(clients, [incident()], '2026-09-10T12:05:00.000Z');
+  // A second distinct incident in a different month partition exercises multi-partition copy.
+  await upsertIncidents(
+    clients,
+    [incident({ dedupKey: 'ID:77', dateFirstIso: '2026-10-02T09:30:00.000Z' })],
+    '2026-10-02T14:00:00.000Z'
+  );
+
+  const res = await backupDataTables(clients, '2026-10-03T00:00:00.000Z');
+  assert.equal(res.incidents, 2);
+
+  const arch = [...bs.tables.get('incidentsArchive').values()];
+  assert.deepEqual(arch.map((e) => e.rowKey).sort(), ['ID:42', 'ID:77']);
+  // Copied rows carry the source row's identity + provenance fields intact.
+  const copied = arch.find((e) => e.rowKey === 'ID:42');
+  assert.equal(copied.partitionKey, '2026-09');
+  assert.equal(copied.pollCount, 1);
+  assert.equal(copied.firstSeenAt, '2026-09-10T12:05:00.000Z');
+});
+
+test('backup is idempotent — re-running does not duplicate archive rows', async () => {
+  const bs = makeFakeBackstore();
+  const clients = clientsFrom(bs);
+  await upsertIncidents(clients, [incident()], '2026-09-10T12:05:00.000Z');
+  await backupDataTables(clients, '2026-09-10T13:00:00.000Z');
+  await backupDataTables(clients, '2026-09-10T14:00:00.000Z');
+  // Replace-mode copy over the same PK+RK collapses to one row per incident.
+  assert.equal([...bs.tables.get('incidentsArchive').values()].length, 1);
+});
+
+test('status_history mirrors into statusHistoryArchive with its own partitioning', async () => {
+  const bs = makeFakeBackstore();
+  const clients = clientsFrom(bs);
+  await upsertIncidents(clients, [incident({ status: 'In Progress' })], '2026-09-10T12:05:00.000Z');
+  await upsertIncidents(clients, [incident({ status: 'Resolved' })], '2026-09-11T08:00:00.000Z');
+  const res = await backupDataTables(clients, '2026-09-12T00:00:00.000Z');
+  assert.equal(res.statusHistory, 2);
+  const hist = [...bs.tables.get('statusHistoryArchive').values()];
+  assert.deepEqual(hist.map((e) => e.status).sort(), ['In Progress', 'Resolved']);
+  // History rows keep their pinned-partition key and the incident cross-reference.
+  for (const row of hist) {
+    assert.equal(row.partitionKey, '2026-09');
+    assert.equal(row.incidentRowKey, 'ID:42');
+  }
+});
+
+test('backup stamps a last_backup pointer so its freshness is observable', async () => {
+  const bs = makeFakeBackstore();
+  const clients = clientsFrom(bs);
+  assert.equal(await latestBackup(clients), null);
+  await backupDataTables(clients, '2026-09-12T00:00:00.000Z');
+  const ptr = await latestBackup(clients);
+  assert.equal(ptr.ts, '2026-09-12T00:00:00.000Z');
+  assert.ok(Number.isFinite(ptr.incidents));
+  assert.ok(Number.isFinite(ptr.statusHistory));
+});
+
+test('copyTableToArchive respects its wall-clock budget on an empty table', async () => {
+  const bs = makeFakeBackstore();
+  const clients = clientsFrom(bs);
+  // No rows → copied 0, and no archive rows are fabricated from nothing (the fake backstore
+  // only materializes a table on first write, so "no archive" is "no map entry at all").
+  const res = await copyTableToArchive(clients, clients.incidents, clients.incidentsArchive, '2026-09-12T00:00:00.000Z');
+  assert.equal(res.copied, 0);
+  assert.equal([...(bs.tables.get('incidentsArchive')?.values() ?? [])].length, 0);
+});
+
+test('recordTickFailure does not clobber a fresh last_backup pointer (separate row)', async () => {
+  const bs = makeFakeBackstore();
+  const clients = clientsFrom(bs);
+  await backupDataTables(clients, '2026-09-12T00:00:00.000Z');
+  // A later ingest failure writes to meta/last_poll — the backup pointer must survive untouched.
+  const { recordTickFailure } = await import('../src/store/tableStore.js');
+  await recordTickFailure(clients, 'backup lane blew up');
+  const ptr = await latestBackup(clients);
+  assert.equal(ptr.ts, '2026-09-12T00:00:00.000Z');
 });
