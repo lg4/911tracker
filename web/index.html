@@ -226,7 +226,9 @@
 
     let allFeatures = [];
     let iconLayer = null; // T30: L.layerGroup of per-incident markers, shown at/beyond ICON_ZOOM
+    let recentLayer = null; // T28: recent-window markers, shown at EVERY zoom on top of the heat view
     const ICON_ZOOM = 12; // heat reads as density below this; street-level icons take over above it
+    const RECENT_HOURS = 4; // T28: incidents seen within this window read as "just happened" at any zoom
     let presentCats = []; // categories in the current window (built by buildChips)
     let selectedCat = null; // exclusive-select state: null = All visible
     let hiddenCats = new Set();
@@ -276,35 +278,49 @@
     // a point on its own address. Below the threshold the markers stay hidden so dense
     // areas keep their density signal rather than collapsing into an unreadable blob of dots.
     const iconMarkers = new Map(); // category → L.circleMarker[]
+    // T28: "recent" means lastSeenAt within RECENT_HOURS of now — these are the events a
+    // dispatcher would call fresh, so they earn a point marker even while the rest of the
+    // screen still reads as aggregate heat below ICON_ZOOM.
+    function isRecent(props) {
+      const t = Date.parse(props.lastSeenAt ?? props.dateFirst ?? '');
+      return Number.isFinite(t) && Date.now() - t <= RECENT_HOURS * 60 * 60 * 1000;
+    }
     function renderIcons() {
       if (iconLayer) map.removeLayer(iconLayer);
+      if (recentLayer) map.removeLayer(recentLayer);
       iconMarkers.clear();
-      // Built detached; applyZoomMode() decides whether it sits on the map at this zoom.
-      iconLayer = L.layerGroup();
+      // Both groups built detached; applyZoomMode() decides placement at this zoom.
+      iconLayer = L.layerGroup();   // non-recent: shown only at/beyond ICON_ZOOM
+      recentLayer = L.layerGroup(); // recent: always on top, any zoom
       for (const f of visibleFeatures()) {
         const c = classify(f);
         if (hiddenCats.has(c)) continue;
         const [lng, lat] = f.geometry.coordinates;
-        m_addIcon(lat, lng, c, f.properties);
+        m_addIcon(lat, lng, c, f.properties, isRecent(f.properties));
       }
       applyZoomMode();
     }
 
-    function m_addIcon(lat, lng, c, props) {
+    function m_addIcon(lat, lng, c, props, recent) {
       const color = CATS.find((x) => x.key === c).color;
-      const m = L.circleMarker([lat, lng], { radius: 6, color, weight: 1.5, fillColor: color, fillOpacity: 0.85 });
-      m.bindPopup(`<b>${c.toUpperCase()}</b><br>${props.title || props.type || ''}<br><small>${(props.lastSeenAt || '').replace('T', ' ').slice(0, 16)}</small>`);
+      // Recent events read as "just happened": bigger halo + white ring so they pop off the heat wash.
+      const m = L.circleMarker([lat, lng], recent
+        ? { radius: 9, weight: 2, color: '#ffffff', fillColor: color, fillOpacity: 0.95 }
+        : { radius: 6, color, weight: 1.5, fillColor: color, fillOpacity: 0.85 });
+      m.bindPopup(`<b>${c.toUpperCase()}${recent ? ' · recent' : ''}</b><br>${props.title || props.type || ''}<br><small>${(props.lastSeenAt || '').replace('T', ' ').slice(0, 16)}</small>`);
       if (!iconMarkers.has(c)) iconMarkers.set(c, []);
-      iconMarkers.get(c).push(m.addTo(iconLayer));
+      iconMarkers.get(c).push(m.addTo(recent ? recentLayer : iconLayer));
     }
 
     // T30: heat is the density view below ICON_ZOOM; per-incident icons take over at/above it.
-    // Both layers stay built — this only toggles which one sits on the map, so zooming back
-    // in never leaves an empty map (the group persists across mode swaps).
+    // T28: recent-window markers ride on top of the heat at EVERY zoom — a fresh event should be
+    // findable even while the surrounding area still reads as aggregate density. Both groups stay
+    // built across mode swaps so zooming back never leaves an empty map (they persist).
     function applyZoomMode() {
       const showIcons = map.getZoom() >= ICON_ZOOM;
       for (const l of heatLayers) map[showIcons ? 'removeLayer' : 'addLayer'](l);
       if (iconLayer) map[showIcons ? 'addLayer' : 'removeLayer'](iconLayer);
+      if (recentLayer) map.addLayer(recentLayer); // always visible, any zoom
     }
 
     function buildChips() {
