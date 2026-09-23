@@ -150,6 +150,78 @@ export function parseCadinet(html) {
   return { incidents, skipped };
 }
 
+// Resolve a year-less "M/D hh:mm AM|PM" cell against the page's year-bearing "as of ... M/D/YYYY"
+// footer. Rows are assumed to sit in the footer's calendar year; one that lands AFTER the as-of
+// moment is attributed to the prior year (the zone keeps a rolling list that spans New Year's).
+// With no footer we fall back to the current year. Returns ISO UTC or null on unparseable input.
+export function tincTimeToIso(m, d, h, min, meridiem, refDateTime) {
+  const base = refDateTime ?? DateTime.now().setZone(config.timezone);
+  // Luxon's fromObject takes no meridiem unit; fold AM/PM into a 24-hour clock value.
+  const hour24 = h % 12 + (String(meridiem).toUpperCase() === 'PM' ? 12 : 0);
+  let dt = DateTime.fromObject(
+    { month: m, day: d, hour: hour24, minute: min, year: base.year },
+    { zone: config.timezone }
+  );
+  if (dt > base) dt = dt.minus({ years: 1 });
+  return dt.isValid ? dt.toUTC().toISO() : null;
+}
+
+// Parse the TINC SY-zone event table (plain-GET HTML, no postback). Columns per row:
+// Call# | M/D hh:mm AM|PM (no year) | Call Type | MP milepost. Locations are mileposts only —
+// not geocodable — so rows carry null lat/lng and follow the Onondaga precedent (stored + API-
+// filterable via ?county=, never rendered in the browser). Dedup keys off the zero-padded call
+// number so a re-scrape of the same event maps to the same rowKey across ticks. Malformed rows
+// are counted as skipped, never thrown.
+export function parseTinc(html) {
+  const $ = cheerio.load(String(html));
+  // Footer: "... Incidents, as of 4:27:40 AM EST 9/23/2026" supplies the reference datetime.
+  const asOfMatch = String($.root().text()).match(
+    /as of\s+[\d:]+\s+(?:AM|PM)\b[^0-9]*(\d{1,2})\/(\d{1,2})\/(\d{4})/i
+  );
+  const refDateTime = asOfMatch
+    ? DateTime.fromObject(
+        { month: +asOfMatch[1], day: +asOfMatch[2], year: +asOfMatch[3] },
+        { zone: config.timezone }
+      )
+    : null;
+
+  let skipped = 0;
+  const incidents = [];
+  $('table tbody tr').each((_, trEl) => {
+    const cells = $(trEl).find('td');
+    if (cells.length < 4) return; // header/foot rows have fewer columns
+    const callNumber = cells.eq(0).text().trim() || null;
+    const typeText = cells.eq(2).text().replace(/\s+/g, ' ').trim().toUpperCase() || null;
+    const location = cells.eq(3).text().replace(/\s+/g, ' ').trim() || null;
+    const t = String(cells.eq(1).text()).match(/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    const dateFirstIso = t
+      ? tincTimeToIso(+t[1], +t[2], +t[3], +t[4], t[5].toUpperCase(), refDateTime)
+      : null;
+    if (!callNumber && !dateFirstIso) {
+      skipped += 1;
+      return;
+    }
+    incidents.push({
+      dedupKey: callNumber ? `TINC:${callNumber}` : `TINC-TS:${(dateFirstIso ?? '').slice(5, 16)}:${typeText ?? ''}`,
+      sourceId: null,
+      title: [typeText, location].filter(Boolean).join(' — ') || null,
+      type: typeText,
+      status: 'Active', // the zone page only lists active events; closed ones disappear
+      departments: [],
+      location,
+      lat: null,
+      lng: null,
+      icon: null,
+      callNumber,
+      dateFirstIso,
+      createdAtIso: dateFirstIso,
+      lastEditedAtIso: null,
+      raw: String($(trEl).text()).replace(/\s+/g, ' ').trim() || null,
+    });
+  });
+  return { incidents, skipped };
+}
+
 // Parse the JSON feed body into valid incidents. Accepts a bare array or an object with
 // an `incidents` array. Bad records are counted as skipped, never thrown.
 export function parseFeedArray(json) {

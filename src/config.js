@@ -43,6 +43,14 @@ export const config = {
       // Covers Syracuse metro + county seats; geocode results outside are dropped.
       bbox: { latMin: 42.85, latMax: 43.35, lngMin: -76.55, lngMax: -75.9 },
     },
+    {
+      id: 'tinc-sy',
+      name: 'TINC SY Zone (I-480/I-90 through Syracuse)',
+      kind: 'tinc-html',
+      url: process.env.TINC_SY_FEED_URL || 'https://tincevents.thruway.ny.gov/tincview.aspx?zone=SY',
+      // Milepost-only locations carry no coordinates; the box is informational only.
+      bbox: { latMin: 42.85, latMax: 43.35, lngMin: -76.55, lngMax: -75.9 },
+    },
   ],
 
   // Nominatim (keyless) is used to geocode CAD rows that carry no coordinates.

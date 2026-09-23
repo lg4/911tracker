@@ -153,3 +153,59 @@ test('parseCadinet tolerates malformed / empty input without throwing', () => {
   assert.equal(incidents.length, 0);
   assert.equal(skipped, 1);
 });
+
+// ---- TINC SY-zone feed (TINC events page, plain-GET HTML table) -------------------------
+import { parseTinc, tincTimeToIso } from '../src/ingest/parse.js';
+import { DateTime } from 'luxon';
+
+const TINC_HTML = readFileSync(join(here, 'fixtures', 'tinc.snippet.html'), 'utf8');
+const TINC_REF = DateTime.fromObject({ month: 9, day: 23, year: 2026, hour: 4, minute: 27, second: 40 }, { zone: 'America/New_York' });
+
+test('parseTinc parses every row of the live fixture', () => {
+  const { incidents, skipped } = parseTinc(TINC_HTML);
+  assert.equal(incidents.length, 10);
+  assert.equal(skipped, 0);
+});
+
+test('parseTinc maps fields and infers year-less times against the as-of footer (EDT)', () => {
+  const [first] = parseTinc(TINC_HTML).incidents;
+  assert.equal(first.callNumber, '0449');
+  assert.equal(first.type, 'LANE CLOSURE');
+  assert.match(first.location, /^MP 343\.00 TO 346\.0 I-90 West$/);
+  assert.equal(first.lat, null); // milepost-only locations are not geocodable
+  // "9/22 08:16 PM" America/New_York EDT → 00:16 UTC next day. Year comes from the footer's 9/23/2026.
+  assert.equal(first.dateFirstIso, '2026-09-23T00:16:00.000Z');
+  assert.equal(first.dedupKey, 'TINC:0449'); // zero-padded call number is stable across re-scrapes
+  assert.equal(first.status, 'Active');
+});
+
+test('tincTimeToIso attributes rows after the as-of moment to the prior year', () => {
+  // Fixture row "10/07 01:55 PM" sits AFTER the as-of instant (Sep 23) → prior calendar year;
+  // Oct 7, 2025 is still daylight time (DST ends Nov 2) so 1:55 PM EDT → 17:55 UTC.
+  const iso = tincTimeToIso(10, 7, 1, 55, 'PM', TINC_REF);
+  assert.equal(iso, '2025-10-07T17:55:00.000Z');
+  // A row dated before the as-of instant stays in its own year.
+  assert.equal(tincTimeToIso(8, 12, 21, 31, 'PM', TINC_REF), '2026-08-13T01:31:00.000Z');
+});
+
+test('parseTinc dedup keys are stable across whitespace-normalized re-scrapes', () => {
+  const a = parseTinc(TINC_HTML).incidents.map((i) => i.dedupKey);
+  const b = parseTinc(TINC_HTML.replace(/\s+/g, ' ')).incidents.map((i) => i.dedupKey);
+  assert.deepEqual(a, b);
+});
+
+test('parseTinc tolerates malformed / empty input without throwing', () => {
+  assert.deepEqual(parseTinc('').incidents, []);
+  assert.deepEqual(parseTinc(null), { incidents: [], skipped: 0 });
+  // No footer → falls back to current-year inference; rows with no date at all are skipped.
+  const noFooter = `<table><tbody>
+    <tr><td></td><td></td><td></td><td></td></tr><!-- zero fields → skipped -->
+    <tr><td>0777</td><td>nonsense time</td><td>Lane Closure</td><td>MP 99 I-480 West</td></tr>
+  </tbody></table>`;
+  const { incidents, skipped } = parseTinc(noFooter);
+  assert.equal(skipped, 1);
+  assert.equal(incidents.length, 1);
+  assert.equal(incidents[0].callNumber, '0777');
+  assert.equal(incidents[0].dedupKey, 'TINC:0777'); // call number wins over the timestamp-fallback key
+  assert.equal(incidents[0].dateFirstIso, null);
+});

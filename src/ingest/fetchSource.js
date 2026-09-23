@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { config, configLegacy } from '../config.js';
-import { parseFeedArray, parseHtmlFallback, parseCadinet, inBbox } from './parse.js';
+import { parseFeedArray, parseHtmlFallback, parseCadinet, parseTinc, inBbox } from './parse.js';
 
 // T12(a) provenance: hash of the raw fetched body so a stored row can be traced back to
 // exactly the bytes that were live at fetch time.
@@ -117,6 +117,12 @@ export async function pollSource(source, opts = {}) {
       rows = rows.filter((r) => r.lat == null || r.lng == null || inBbox(r.lat, r.lng, source.bbox));
       if (rows.length < before) warnings.push(`${before - rows.length} row(s) dropped: geocode outside ${source.id} bbox`);
       console.log(`${source.id}: parsed ${before}, kept ${rows.length}, geocoded ${geocoded} new streets`);
+    } else if (source.kind === 'tinc-html') {
+      // TINC zone page: plain-GET HTML event table. Milepost-only locations carry no address to
+      // resolve, so there is no Nominatim step here (unlike CADInet) — rows store with null coords.
+      rawText = await httpGetText(source.url, 'text/html');
+      ({ incidents: rows, skipped } = parseTinc(rawText));
+      console.log(`${source.id}: parsed ${rows.length}`);
     } else {
       // Oneida primary feed: structured JSON with coordinates already attached.
       rawText = await httpGetText(source.url);
@@ -141,7 +147,8 @@ export async function pollSource(source, opts = {}) {
       fetchedAt: fetchedAtIso,
     };
   } catch (err) {
-    warnings.push(`${source.kind === 'cadinet-html' ? 'CADInet' : 'primary'} feed failed (${err.message})`);
+    const kindLabel = { 'cadinet-html': 'CADInet', 'tinc-html': 'TINC' }[source.kind] ?? 'primary';
+    warnings.push(`${kindLabel} feed failed (${err.message})`);
     if (source.htmlUrl && source.kind !== 'cadinet-html') {
       try {
         const htmlText = await httpGetText(source.htmlUrl, 'text/html');

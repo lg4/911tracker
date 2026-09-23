@@ -57,3 +57,32 @@ test('pollSource drops cadinet rows whose geocode lands outside the source bbox'
     globalThis.fetch = realFetch;
   }
 });
+
+// Stub fetch: the zone page GET returns the captured fixture table; no Nominatim involved —
+// milepost locations carry no address to resolve, so rows keep null coordinates.
+test('pollSource parses the tinc-html kind and tags rows with county + tick checksum', async () => {
+  const realFetch = globalThis.fetch;
+  const BODY = readFileSync(join(here, 'fixtures', 'tinc.snippet.html'), 'utf8');
+  let nominatimHits = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('nominatim')) nominatimHits += 1;
+    return { ok: true, text: async () => BODY };
+  };
+  try {
+    const source = { id: 'tinc-sy', kind: 'tinc-html', url: 'http://stub.local/tincview.aspx?zone=SY', bbox: {} };
+    const result = await pollSource(source, {});
+    assert.equal(result.source, 'tinc-sy');
+    assert.equal(result.checksum, sha256hex(BODY));
+    assert.ok(result.fetchedAt && !Number.isNaN(Date.parse(result.fetchedAt)));
+    assert.equal(result.incidents.length, 10);
+    for (const inc of result.incidents) {
+      assert.equal(inc.county, 'tinc-sy');
+      assert.equal(inc.tickChecksum, sha256hex(BODY));
+      assert.equal(inc.lat, null); // milepost-only locations are not geocodable
+      assert.equal(inc.lng, null);
+    }
+    assert.equal(nominatimHits, 0); // no Nominatim step for the TINC feed
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
