@@ -29,3 +29,6 @@ infra/*.tfstate*
 
 # Local tooling caches
 .impeccable/
+
+# Claude Code local session state (overnight-loop bookkeeping; not project content)
+.claude/ralph-loop.local.md
