@@ -16,8 +16,10 @@
        wraps never clip or overlap the map. */
     #map { flex: 1; min-height: 0; width: 100%; }
     /* Panning beyond the local tile pyramid shows this "no coverage" fill
-       instead of a broken white void. */
-    .leaflet-container { background: #d7e3ee; }
+       instead of a broken white void — per theme so the uncovered margins
+       read as intentional framing around the tiles rather than a grey hole. */
+    .leaflet-container { background: #10141c; }
+    body.light .leaflet-container { background: #d7e3ee; }
     /* --error tints the shared fire data hue (#e63946) per theme so failures
        keep ≥4.5:1 against each header background. */
     :root { --bg: #1c2330; --panel: #232b3a; --text: #e8ecf3; --muted: #aab4c5; --border: #3a4555; --accent: #2563eb; --error: #ef6b76; }
