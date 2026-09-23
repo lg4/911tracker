@@ -14,6 +14,32 @@ Live resources, deploy mechanics, and failure modes. Architecture and table sche
 
 Local dev loop: `npm test` (node --test; tableStore tests spawn Azurite). No Azure login needed.
 
+## Durability — mirror-table backup lane (T12b)
+
+The tables are **LRS** (locally-redundant storage) with no geo-replication today. As a zero-new-tier
+mitigation, an hourly timer (`functions/backup`, schedule `5 */1 * * * *`) copies every row of
+`incidents` + `status_history` into sibling archive tables in the **same storage account**:
+`incidentsArchive` / `statusHistoryArchive`. The copy is lease-guarded like ingest (multi-instance
+consumption plans never double-copy), each run stamps `meta`/`last_backup`, and failures land in
+`recordTickFailure` (`backup: …`). Because Replace-mode re-runs are idempotent, a partial round
+self-heals on the next tick — the archive can only lag, it cannot corrupt live data (it never feeds
+back into the read path).
+
+**Freshness check:** query `meta`/`last_backup`; its `ts` should be within ~1h. A stale pointer is
+the failure to investigate (check function app logs for `backup:` entries).
+
+**Restore procedure** (after a table-level loss or a bad app-side write):
+1. Drop/recreate the damaged live table(s) via `scripts/create-tables.js` (idempotent).
+2. Copy rows back from the corresponding archive table (`incidentsArchive` → `incidents`, etc.) —
+   same PK/RK scheme, so it's a straight per-row upsert; script it with `TableClient.listEntities` +
+   `upsertEntity(entity, 'Replace')` exactly as `copyTableToArchive` does, stripping `_etag`.
+3. Re-ingest catches up within one 10-min poll; verify `meta`/`last_poll` advances again.
+
+**Known limitation:** the archive shares fate with the storage account (same LRS tier), so this
+guards table-level and application-level loss, **not** an account outage. Recommended follow-up:
+flip `account_replication_type` to `GRS` in `infra/main.tf` (cost increase on the storage account)
+for availability-level durability against a full-account regional outage.
+
 ## Deploying functions (.github/workflows/deploy-functions.yml)
 
 The workflow stages a self-contained bundle into `dist/`: `functions/*`, referenced
