@@ -190,9 +190,10 @@ and `functions/ingest` is now the only poller.
 
 ### Outstanding at session handoff
 
-- [x] Web deploy green (`deploy-web` at 547fc47); SWA token issue resolved via GH secret `SWA_CLI_DEPLOYMENT_TOKEN`.
-- [x] Retire local Postgres path (drop `pg`, stop docker db/ingest containers).
-- [x] Ops runbook → docs/runbook.md.
-- [ ] **Blocked:** every `deploy-functions` run since 266ac82 fails sync-trigger with "Function app may have malformed content" even with a verified-correct bundle (root host.json present). Per the error's own remedy, restart `o911func-e10tr1` manually (`az functionapp restart ...` or Portal), then re-dispatch the workflow — suspect the runtime is stuck on a stale WEBSITE_RUN_FROM_PACKAGE value.
-- [ ] Verify timer ingest tick lands rows + `meta.last_poll` advances once functions deploy goes green.
-- [ ] Curl `https://o911func-e10tr1.azurewebsites.net/api/incidents?since=...` for GeoJSON + CORS headers; browser-check the deployed map end-to-end.
+All closed: web deploy green (SWA token via GH secret `SWA_CLI_DEPLOYMENT_TOKEN`); local
+Postgres path retired; ops runbook in docs/runbook.md. The "malformed content" sync-trigger
+block was resolved (diagnosis order documented under that failure mode in the runbook — root
+`host.json` fix plus manual app restart). Timer ingest ticks land rows and advance
+`meta.last_poll`/provenance pointers (verified live repeatedly); `/api/incidents` returns
+GeoJSON with fresh provenance from outside, and the deployed map has been browser-checked
+end-to-end across many sessions.
