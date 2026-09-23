@@ -15,9 +15,13 @@
     { key: 'civil', label: 'Civil', color: '#f4a261' },
     { key: 'other', label: 'Other', color: '#9aa0b4' },
   ];
-  // T14: numeric CAD dispatch codes (06D02-BREATHING PROBLEMS, 31D04-UNCONSCIOUS/FAINTING,
-  // 33C07-TRANSFER, …) all follow the XX[BCD]YY pattern and are EMS responses.
-  const EMS_CODE_RX = /^\d{2}[BCD]\d{2}\b/i;
+  // T14 / T31: numeric CAD dispatch codes (06D02-BREATHING PROBLEMS, 31D04-UNCONSCIOUS/
+  // FAINTING, 33C07-TRANSFER, …) all follow the XX?YY shape and are EMS responses. The
+  // third char is any letter in practice — the feed's alphabet runs A/B/C/D/O (e.g.
+  // 16A01-EYE PROBLEMS, 26O06-SICK PERSON), not just B/C/D, so a narrower [BCD] class let
+  // real medical rows fall through to other. No police/fire type uses this numeric prefix
+  // shape in the feed, so matching on it can't mis-bucket those.
+  const EMS_CODE_RX = /^\d{2}[A-Z]\d{2}\b/i;
   const CATEGORY_RX = {
     // T29: elevator entrapments are handled by the FD like any other technical rescue.
     fire: /\b(FIRE|BURN(?:ING)?|SMOKE|CARBON MONOXIDE|HAZMAT|CHEMICAL|ALARM|ELEVATOR RESCUE)\b|MVA-FD/i,

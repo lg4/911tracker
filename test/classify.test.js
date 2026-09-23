@@ -33,6 +33,25 @@ test('numeric CAD dispatch codes are EMS responses', () => {
   assert.equal(classify(f('33C07-TRANSFER')), 'ems');
 });
 
+test('T31: medical codes whose third char is A or O no longer fall to other', () => {
+  // The feed's numeric-code alphabet runs A/B/C/D/O, not just B/C/D. These rows were
+  // previously misfiled into the Other bucket purely from a too-narrow [BCD] class —
+  // even where a keyword (FALL, SICK) would have rescued them, EYE PROBLEMS had none.
+  assert.equal(classify(f('16A01-EYE PROBLEMS')), 'ems');
+  assert.equal(classify(f('17A04-FALL (PUBLIC ASSIST)')), 'ems');
+  assert.equal(classify(f('26O06-SICK PERSON')), 'ems');
+  assert.equal(classify(f('19D01-HEART PROBLEMS')), 'ems');
+});
+
+test('the broadened code pattern does not swallow non-medical noise', () => {
+  // Uninterpretable CAD noise still lands in other; and a bare two-digit prefix with no
+  // trailing digits must not match (the \b after four digits keeps it anchored).
+  assert.equal(classify(f('ATL')), 'other');
+  assert.equal(classify(f('DISCON')), 'other');
+  assert.equal(classify(f('MHL')), 'other');
+  assert.equal(classify(f('Unknown')), 'other');
+});
+
 test('standalone assist rows land in civil, not other (T29 regression)', () => {
   // The documented-but-unwired civil branch: before the fix these fell through to
   // other despite a live Civil chip — this is what left ~44 rows in Other.
