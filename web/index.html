@@ -427,9 +427,19 @@
       }
     }
 
+    // T19: build N-days-back as the viewer's LOCAL calendar date, not a UTC one.
+    // getFullYear/getMonth/getDate read local time, so daysAgo(0) is always the
+    // user's today even when their clock is past ~7pm (where Date.now()'s UTC day
+    // has already rolled over). /api/incidents interprets that string as a UTC
+    // midnight..23:59:59Z band — documented there; the button defaults just need
+    // to name the right local day.
     function daysAgo(n) {
-      const d = new Date(Date.now() - n * 24 * 60 * 60 * 1000);
-      return d.toISOString().slice(0, 10);
+      const d = new Date();
+      d.setDate(d.getDate() - n);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
     }
     // Shareability (P1-2): the window and filters round-trip through the query
     // string so a link reproduces exactly what is on screen; theme stays out of
