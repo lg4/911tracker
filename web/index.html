@@ -6,6 +6,10 @@
   <title>Oneida County 911 Activity Map</title>
   <link rel="stylesheet" href="vendor/leaflet.css" />
   <style>
+    /* T18: native form chrome (date pickers) matches the active theme. The theme
+       classes sit on <body>; color-scheme inherits down to the date inputs from there. */
+    body { color-scheme: dark; }
+    body.light { color-scheme: light; }
     html, body { height: 100%; }
     body { margin: 0; font-family: system-ui, sans-serif; display: flex; flex-direction: column; }
     /* Map fills whatever is left after the (wrapping) header, so mobile
@@ -76,8 +80,13 @@
   </style>
 </head>
 <body>
+  <noscript>
+    <p style="padding:12px;font-family:system-ui">This map needs JavaScript enabled to render — the live incident view can't load without it.</p>
+  </noscript>
   <header>
-    <h1>Oneida County, NY — 911 activity heatmap</h1>
+    <!-- T18: h1 matches the document <title>/baseTitle so there's no
+         "heatmap" vs "Activity Map" divergence between the two surfaces. -->
+    <h1>Oneida County, NY — 911 Activity Map</h1>
     <span class="h-div" aria-hidden="true"></span>
     <label>From <input type="date" id="since" /></label>
     <label>To <input type="date" id="until" /></label>
@@ -349,9 +358,10 @@
       for (const [c, n] of sorted) {
         const meta = CATS.find((x) => x.key === c);
         const chip = document.createElement('button');
+        // T18: no title tooltip here — the count is already rendered on the chip, so a
+        // hover-only duplicate just added an invisible repeat of visible text.
         chip.className = 'chip';
         chip.dataset.type = c;
-        chip.title = `${n} incident${n === 1 ? '' : 's'}`;
         const dot = document.createElement('span');
         dot.className = 'dot';
         dot.style.background = meta.color;
@@ -513,11 +523,12 @@
       document.body.classList.toggle('light', !dark);
       const b = document.getElementById('theme');
       b.textContent = dark ? 'Dark' : 'Light';
-      try { localStorage.setItem('theme-dark', dark ? '1' : ''); } catch {}
+      try { localStorage.setItem('theme-dark', dark ? 'dark' : 'light'); } catch {}
     }
-    // Dark is the default look; only an explicit stored 'light' choice overrides it.
+    // T18: store a real value ('light'|'dark'), not an empty-string sentinel that any
+    // future writer would trip over. Absence (first visit) keeps the dark default.
     let savedDark = true;
-    try { if (localStorage.getItem('theme-dark') === '') savedDark = false; } catch {}
+    try { if (localStorage.getItem('theme-dark') === 'light') savedDark = false; } catch {}
     applyTheme(savedDark);
     document.getElementById('theme').addEventListener('click', () => {
       savedDark = !document.body.classList.contains('dark');
