@@ -69,9 +69,15 @@
        clears the box on every rebuild. */
     #chipbar { display: flex; align-items: center; gap: 12px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--border); }
     #chips { display: flex; flex-wrap: wrap; gap: 6px; }
-    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px dashed var(--border); background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
-    .chip.on { border-style: solid; background: var(--panel); color: var(--text); }
-    .chip .dot { width: 8px; height: 8px; border-radius: 50%; }
+    /* T34: chips are proper buttons now — a colored pill whose border/tint/glow come from
+       each category's --accent so Police/Fire/EMS read at a glance without a separate dot.
+       The dashed resting state keeps "not selected" quiet; .on flips to a solid, tinted fill. */
+    .chip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; border-radius: 999px; border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent); background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .01em; cursor: pointer; transition: background .12s ease, color .12s ease, border-color .12s ease; }
+    .chip:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 80%, transparent); }
+    .chip.on { border-style: solid; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--panel)); color: var(--text); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent); }
+    .chip .icn { width: 13px; height: 13px; flex: none; fill: currentColor; opacity: .9; }
+    /* "All" reset chip carries no category accent — neutral chrome. */
+    #chip-all { --accent: var(--border); color: var(--muted); }
     body.dark .leaflet-tile {
       /* Darken the local OSM tiles with a pure-CSS transform so the map matches
          the dark app chrome without any second tile set or external service. */
@@ -284,15 +290,36 @@
       applyZoomMode();
     }
 
+    // T35: feed timestamps are stored as UTC ("…Z"); render them in America/New_York so the
+    // popup matches how Oneida County's own report shows the call ("09/23/2026 3:48 pm").
+    function cadTime(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return iso;
+      // en-US inserts a comma after the year and an uppercase meridiem; normalize both away to
+      // mirror the county report verbatim.
+      return d.toLocaleString('en-US', { timeZone: 'America/New_York', month: '2-digit', day: '2-digit', year: 'numeric', hour: 'numeric', minute: '2-digit' }).replace(',', '').replace(/(AM|PM)/g, (m) => m.toLowerCase());
+    }
+    // T35: the popup now mirrors what Oneida County 911 publishes for the call — sequence no.,
+    // created date/time, status, type, location — replacing T32's "Category – lastSeenAt / type"
+    // shape that rendered raw UTC. The category label leads line one (color carries it too).
     function m_addIcon(lat, lng, c, props) {
       const color = CATS.find((x) => x.key === c).color;
       const m = L.circleMarker([lat, lng], { radius: 6, color, weight: 1.5, fillColor: color, fillOpacity: 0.85 });
-      // T32 popup format: line one is the category label + date/time ("Police – 2026-09-23 15:50"),
-      // line two the incident type — replacing the old uppercase "POLICE · recent" lead that opened
-      // on an unhelpful tag and raw CAD call number.
-      const dt = (props.lastSeenAt || '').replace('T', ' ').slice(0, 16);
-      const catLabel = c.charAt(0).toUpperCase() + c.slice(1);
-      m.bindPopup(`<b>${catLabel} – ${dt}</b><br>${props.type || props.title || ''}`);
+      // bindPopup inserts content as HTML, so every feed-controlled value must be entity-escaped —
+      // a CAD row carrying <script>/<img onerror=…> in any field would otherwise run in each visitor.
+      const esc = (s) => String(s).replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+      const catLabel = c.charAt(0).toUpperCase() + c.slice(1); // safe: c comes from classify(), not the feed
+      // props.title is Oneida's sequence number ("2026-00017658"); keep it out of line one so it
+      // isn't duplicated by the explicit "Sequence No." row below.
+      const lines = [`<b>${catLabel}</b>`];
+      if (props.title) lines.push(`Sequence No. ${esc(props.title)}`);
+      const created = cadTime(props.dateFirst);
+      if (created) lines.push(`Created ${esc(created)}`);
+      if (props.status) lines.push(`Status ${esc(props.status)}`);
+      if (props.type) lines.push(`Type ${esc(props.type)}`);
+      if (props.location) lines.push(`Location ${esc(props.location)}`);
+      m.bindPopup(lines.join('<br>'));
       if (!iconMarkers.has(c)) iconMarkers.set(c, []);
       iconMarkers.get(c).push(m.addTo(iconLayer));
     }
@@ -309,6 +336,15 @@
       for (const l of heatLayers) map[showIcons ? 'removeLayer' : 'addLayer'](l);
       if (iconLayer) map[showIcons ? 'addLayer' : 'removeLayer'](iconLayer);
     }
+
+    // T34: per-category inline SVG paths (24×24 viewBox) shown on each filter chip so the
+    // three buckets read at a glance without a separate color dot. Police = badge, Fire = flame,
+    // EMS = cross-in-shield. Kept as raw path markup so innerHTML stays simple and dependency-free.
+    const CHIP_ICONS = {
+      police: '<path d="M12 2l7 3v6c0 5-3.2 8.6-7 11-3.8-2.4-7-6-7-11V5l7-3zm0 4a3.5 3.5 0 100 7 3.5 3.5 0 000-7z"/>',
+      fire: '<path d="M12 2s5 4 5 9a5 5 0 01-10 0c0-1.6.6-3 1.4-4 .2 1.2 1 2 2 2.3C10 6.5 11 4 12 2zm0 12a2 2 0 00-2 2c0 1 .7 2 2 2s2-1 2-2a2 2 0 00-2-2z" fill-rule="evenodd"/>',
+      ems: '<path d="M12 2l8 3v7c0 4.7-3.3 8.2-8 10-4.7-1.8-8-5.3-8-10V5l8-3zm0 6v3H9v3h3v3h3v-3h3v-3h-3V8h-3z"/>',
+    };
 
     function buildChips() {
       const box = document.getElementById('chips');
@@ -336,20 +372,24 @@
       for (const [c, n] of sorted) {
         const meta = CATS.find((x) => x.key === c);
         const chip = document.createElement('button');
-        // T18: no title tooltip here — the count is already rendered on the chip, so a
+        // T34: no title tooltip here — the count is already rendered on the chip, so a
         // hover-only duplicate just added an invisible repeat of visible text.
         chip.className = 'chip';
         chip.dataset.type = c;
-        const dot = document.createElement('span');
-        dot.className = 'dot';
-        dot.style.background = meta.color;
+        // Per-category accent drives the pill's border/tint/glow (see .chip CSS above).
+        chip.style.setProperty('--accent', meta.color);
+        // Icon reads the category at a glance; fill:currentColor inherits the button color.
+        const icn = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        icn.setAttribute('class', 'icn');
+        icn.setAttribute('viewBox', '0 0 24 24');
+        icn.innerHTML = CHIP_ICONS[c];
         // Label text node is kept addressable: syncChipStates() flips it to
         // "Only …" when this chip is the sole visible category.
         const lbl = document.createElement('span');
         lbl.className = 'lbl';
-        lbl.textContent = ` ${meta.label} (${n})`;
+        lbl.textContent = `${meta.label} (${n})`;
         chip.dataset.count = String(n);
-        chip.append(dot, lbl);
+        chip.append(icn, lbl);
         // Exclusive select: clicking isolates that category (the only one left
         // visible); clicking the already-isolated chip again returns to All.
         chip.addEventListener('click', () => {
@@ -454,7 +494,7 @@
     else document.getElementById('since').value = daysAgo(30);
     if (/^\d{4}-\d{2}-\d{2}$/.test(paramsIn.get('until') ?? '')) document.getElementById('until').value = paramsIn.get('until');
     else document.getElementById('until').value = daysAgo(0);
-    selectedCat = ['police', 'fire', 'ems', 'other'].includes(paramsIn.get('category')) ? paramsIn.get('category') : null;
+    selectedCat = ['police', 'fire', 'ems'].includes(paramsIn.get('category')) ? paramsIn.get('category') : null;
 
     function syncUrl() {
       // replaceState, not push: filter tweaks must not litter the back stack.
