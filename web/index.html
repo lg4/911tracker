@@ -203,6 +203,10 @@
       if (CATEGORY_RX.fire.test(text)) return 'fire';
       if (EMS_CODE_RX.test(type) || CATEGORY_RX.ems.test(text)) return 'ems';
       if (CATEGORY_RX.police.test(text)) return 'police';
+      // T29 was documented as moving these rows to civil but the branch was never wired up
+      // — classify() fell straight through to other, so ~44 rows sat in Other despite a
+      // live Civil chip + regex. Test civil before other; residual CAD noise stays other.
+      if (CATEGORY_RX.civil.test(text)) return 'civil';
       return 'other';
     }
 
