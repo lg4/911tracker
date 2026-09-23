@@ -100,6 +100,13 @@ Diagnosis order (all verified as dead-ends or fixes in September 2026):
 - Single-instance safety lives in Table Storage: acquire the lease entity before polling,
   release in `finally`; lease TTL (15 min) must stay above the function timeout.
 
+## Basemap caveat (by design)
+
+The basemap is a local vendored OSM tile pyramid served from `/tiles/{z}/{x}/{y}.png` — dark mode
+is pure-CSS tile inversion of those tiles, light mode serves the raw unstyled pyramid as-is. Light
+mode therefore looks plainer than typical styled basemaps; that's a consequence of the keyless /
+offline constraint, not a rendering bug. Regenerate the pyramid via `scripts/gen-tiles.js`.
+
 ## Secrets map (never print these)
 
 | Secret | Where | Used by |
