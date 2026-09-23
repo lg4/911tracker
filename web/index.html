@@ -181,7 +181,7 @@
       noWrap: true,
     }).addTo(map);
 
-    // T30: swap heat ↔ per-incident icons as the user crosses ICON_ZOOM.
+    // T32: swap heat ↔ per-incident icons as the user reaches MAX_ZOOM (exclusive at max).
     map.on('zoomend', applyZoomMode);
 
     // Incident categories (T8): CATS + classify() now ship from ./classify.js (loaded
@@ -215,10 +215,10 @@
     }
 
     let allFeatures = [];
-    let iconLayer = null; // T30: L.layerGroup of per-incident markers, shown at/beyond ICON_ZOOM
-    let recentLayer = null; // T28: recent-window markers, shown at EVERY zoom on top of the heat view
-    const ICON_ZOOM = 12; // heat reads as density below this; street-level icons take over above it
-    const RECENT_HOURS = 4; // T28: incidents seen within this window read as "just happened" at any zoom
+    let iconLayer = null; // T32: L.layerGroup of per-incident markers, shown only AT MAX_ZOOM (heat below)
+    // T32: handoff sits at the tile/map ceiling so the heat layer is the sole representation at
+    // every zoom below max — no dots riding over the wash mid-zoom (T28's always-on recent set is gone).
+    const MAX_ZOOM = 14; // must match map + tile-layer maxZoom above
     let presentCats = []; // categories in the current window (built by buildChips)
     let selectedCat = null; // exclusive-select state: null = All visible
     let hiddenCats = new Set();
@@ -263,58 +263,51 @@
       document.title = latest ? `${baseTitle} · updated ${new Date(latest.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : baseTitle;
     }
 
-    // T30: past ICON_ZOOM the per-category heat washes stop being meaningful at street
+    // T32: past MAX_ZOOM the per-category heat washes stop being meaningful at street
     // scale — swap them for one colored circleMarker per incident so each event reads as
-    // a point on its own address. Below the threshold the markers stay hidden so dense
-    // areas keep their density signal rather than collapsing into an unreadable blob of dots.
+    // a point on its own address. The handoff sits exactly at the tile/map ceiling so the
+    // heat layer stays the sole representation at every zoom below max (no dots riding over
+    // the wash mid-zoom). Below the threshold the markers stay hidden so dense areas keep
+    // their density signal rather than collapsing into an unreadable blob of dots.
     const iconMarkers = new Map(); // category → L.circleMarker[]
-    // T28: "recent" means lastSeenAt within RECENT_HOURS of now — these are the events a
-    // dispatcher would call fresh, so they earn a point marker even while the rest of the
-    // screen still reads as aggregate heat below ICON_ZOOM.
-    function isRecent(props) {
-      const t = Date.parse(props.lastSeenAt ?? props.dateFirst ?? '');
-      return Number.isFinite(t) && Date.now() - t <= RECENT_HOURS * 60 * 60 * 1000;
-    }
     function renderIcons() {
       if (iconLayer) map.removeLayer(iconLayer);
-      if (recentLayer) map.removeLayer(recentLayer);
       iconMarkers.clear();
-      // Both groups built detached; applyZoomMode() decides placement at this zoom.
-      iconLayer = L.layerGroup();   // non-recent: shown only at/beyond ICON_ZOOM
-      recentLayer = L.layerGroup(); // recent: always on top, any zoom
+      // Built detached; applyZoomMode() decides placement at this zoom.
+      iconLayer = L.layerGroup();   // shown only AT MAX_ZOOM (or when a category is isolated)
       for (const f of visibleFeatures()) {
         const c = classify(f);
         if (hiddenCats.has(c)) continue;
         const [lng, lat] = f.geometry.coordinates;
-        m_addIcon(lat, lng, c, f.properties, isRecent(f.properties));
+        m_addIcon(lat, lng, c, f.properties);
       }
       applyZoomMode();
     }
 
-    function m_addIcon(lat, lng, c, props, recent) {
+    function m_addIcon(lat, lng, c, props) {
       const color = CATS.find((x) => x.key === c).color;
-      // Recent events read as "just happened": bigger halo + white ring so they pop off the heat wash.
-      const m = L.circleMarker([lat, lng], recent
-        ? { radius: 9, weight: 2, color: '#ffffff', fillColor: color, fillOpacity: 0.95 }
-        : { radius: 6, color, weight: 1.5, fillColor: color, fillOpacity: 0.85 });
-      m.bindPopup(`<b>${c.toUpperCase()}${recent ? ' · recent' : ''}</b><br>${props.title || props.type || ''}<br><small>${(props.lastSeenAt || '').replace('T', ' ').slice(0, 16)}</small>`);
+      const m = L.circleMarker([lat, lng], { radius: 6, color, weight: 1.5, fillColor: color, fillOpacity: 0.85 });
+      // T32 popup format: line one is the category label + date/time ("Police – 2026-09-23 15:50"),
+      // line two the incident type — replacing the old uppercase "POLICE · recent" lead that opened
+      // on an unhelpful tag and raw CAD call number.
+      const dt = (props.lastSeenAt || '').replace('T', ' ').slice(0, 16);
+      const catLabel = c.charAt(0).toUpperCase() + c.slice(1);
+      m.bindPopup(`<b>${catLabel} – ${dt}</b><br>${props.type || props.title || ''}`);
       if (!iconMarkers.has(c)) iconMarkers.set(c, []);
-      iconMarkers.get(c).push(m.addTo(recent ? recentLayer : iconLayer));
+      iconMarkers.get(c).push(m.addTo(iconLayer));
     }
 
-    // T30: heat is the density view below ICON_ZOOM; per-incident icons take over at/above it.
-    // T28: recent-window markers ride on top of the heat at EVERY zoom — a fresh event should be
-    // findable even while the surrounding area still reads as aggregate density. Both groups stay
-    // built across mode swaps so zooming back never leaves an empty map (they persist).
+    // T32: heat is the sole representation below MAX_ZOOM; per-incident icons take over AT max
+    // zoom exclusively — nothing icon-shaped coexists with the heat wash at any lower zoom. Both
+    // layers stay built across mode swaps so zooming back never leaves an empty map (they persist).
     // T17: isolating a category chip forces its per-incident points on at ANY zoom — renderIcons()
     // already skips hiddenCats, so when one category is selected iconLayer holds only that
     // category's markers. Detail replaces the aggregate wash: "what's here?" resolves to citable
     // rows instead of an undifferentiated blob, without touching the default zoom-gate behavior.
     function applyZoomMode() {
-      const showIcons = map.getZoom() >= ICON_ZOOM || !!selectedCat;
+      const showIcons = map.getZoom() >= MAX_ZOOM || !!selectedCat;
       for (const l of heatLayers) map[showIcons ? 'removeLayer' : 'addLayer'](l);
       if (iconLayer) map[showIcons ? 'addLayer' : 'removeLayer'](iconLayer);
-      if (recentLayer) map.addLayer(recentLayer); // always visible, any zoom
     }
 
     function buildChips() {
