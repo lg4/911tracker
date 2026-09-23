@@ -12,8 +12,8 @@ const { CATS, classify } = globalThis;
 
 const f = (type, title = '') => ({ properties: { type, title } });
 
-test('CATS has all five categories in display order', () => {
-  assert.deepEqual(CATS.map((c) => c.key), ['police', 'fire', 'ems', 'civil', 'other']);
+test('T34: CATS is exactly three buckets, Police/Fire/EMS in display order', () => {
+  assert.deepEqual(CATS.map((c) => c.key), ['police', 'fire', 'ems']);
 });
 
 test('service keywords bucket correctly', () => {
@@ -33,9 +33,9 @@ test('numeric CAD dispatch codes are EMS responses', () => {
   assert.equal(classify(f('33C07-TRANSFER')), 'ems');
 });
 
-test('T31: medical codes whose third char is A or O no longer fall to other', () => {
-  // The feed's numeric-code alphabet runs A/B/C/D/O, not just B/C/D. These rows were
-  // previously misfiled into the Other bucket purely from a too-narrow [BCD] class —
+test('T31: medical codes whose third char is A or O classify as EMS', () => {
+  // The feed's numeric-code alphabet runs A/B/C/D/O, not just B/C/D. Before T31 widened the
+  // pattern these rows escaped every rule and fell to the default bucket (Police since T34) —
   // even where a keyword (FALL, SICK) would have rescued them, EYE PROBLEMS had none.
   assert.equal(classify(f('16A01-EYE PROBLEMS')), 'ems');
   assert.equal(classify(f('17A04-FALL (PUBLIC ASSIST)')), 'ems');
@@ -43,34 +43,31 @@ test('T31: medical codes whose third char is A or O no longer fall to other', ()
   assert.equal(classify(f('19D01-HEART PROBLEMS')), 'ems');
 });
 
-test('the broadened code pattern does not swallow non-medical noise', () => {
-  // Uninterpretable CAD noise still lands in other; and a bare two-digit prefix with no
-  // trailing digits must not match (the \b after four digits keeps it anchored).
-  assert.equal(classify(f('ATL')), 'other');
-  assert.equal(classify(f('DISCON')), 'other');
-  assert.equal(classify(f('MHL')), 'other');
-  assert.equal(classify(f('Unknown')), 'other');
+test('T34: uninterpretable CAD noise now defaults to Police (no fourth bucket)', () => {
+  // T34 removed the Other/civil buckets — a bare two-digit prefix with no trailing digits
+  // must not be misread as an EMS code, and every residual row lands under Police.
+  assert.equal(classify(f('ATL')), 'police');
+  assert.equal(classify(f('DISCON')), 'police');
+  assert.equal(classify(f('MHL')), 'police');
+  assert.equal(classify(f('Unknown')), 'police');
 });
 
-test('standalone assist rows land in civil, not other (T29 regression)', () => {
-  // The documented-but-unwired civil branch: before the fix these fell through to
-  // other despite a live Civil chip — this is what left ~44 rows in Other.
-  assert.equal(classify(f('ASSIST')), 'civil');
-  assert.equal(classify(f('ASSISTANCE')), 'civil');
-  assert.equal(classify(f('VTL COMPLAINT')), 'civil');
-  assert.equal(classify(f('RUNAWAY')), 'civil');
-  assert.equal(classify(f('FOOUND PERSON')), 'civil'); // feed typo tolerance
-  assert.equal(classify(f('MVA-UNKNOWN')), 'civil');
+test('T34: former civil/welfare-assistance rows fold under Police', () => {
+  // The documented-but-unwired civil branch is gone; its residual set now classifies as
+  // Police so only three chips exist on the map.
+  assert.equal(classify(f('ASSIST')), 'police');
+  assert.equal(classify(f('ASSISTANCE')), 'police');
+  assert.equal(classify(f('VTL COMPLAINT')), 'police');
+  assert.equal(classify(f('RUNAWAY')), 'police');
+  assert.equal(classify(f('FOOUND PERSON')), 'police'); // feed typo tolerance
+  assert.equal(classify(f('MVA-UNKNOWN')), 'police');
 });
 
-test('service keywords win over civil when both match', () => {
+test('service keywords still win over a generic assist when both match', () => {
   assert.equal(classify(f('POLICE ASSIST')), 'police');
   assert.equal(classify(f('OFFICER ASSIST')), 'police');
 });
 
-test('uninterpretable CAD noise stays in other', () => {
-  assert.equal(classify(f('DISCON')), 'other');
-  assert.equal(classify(f('ATL')), 'other');
-  assert.equal(classify(f('Unknown')), 'other');
-  assert.equal(classify(f('', '')), 'other');
+test('T34: empty/blank incidents default to Police, not a fourth bucket', () => {
+  assert.equal(classify(f('', '')), 'police');
 });
