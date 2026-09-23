@@ -24,7 +24,13 @@
     body.light { --bg: #f2f5fa; --panel: #ffffff; --text: #1c2330; --muted: #5b6b82; --border: #cdd6e4; --error: #c1121f; }
     /* position:relative anchors the absolutely-placed #about-panel to the header. */
     header { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: var(--bg); color: var(--text); flex-wrap: wrap; position: relative; }
-    header h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 600; }
+    /* T26: two-line title lockup — a letter-spaced small-caps eyebrow over the
+       weightier map name, so the header reads as an identity, not a default
+       <h1>. Collapses to one line below 720px (eyebrow hidden) so phones keep
+       their current wrapping ergonomics. */
+    header h1 { margin: 0 12px 0 0; display: flex; flex-direction: column; line-height: 1.2; }
+    header h1 .eyebrow { font-size: 10px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+    header h1 .title { font-size: 15px; font-weight: 700; }
     /* P2-4: visual clusters in the wrapping header — a hairline divider between
        logical groups (title / dates / actions / info) so wrap order reads as
        structure at a glance instead of one undifferentiated control soup. */
@@ -35,7 +41,10 @@
     :focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
     button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
     button.ghost.active { color: var(--text); border-color: var(--accent); }
-    #status { font-size: 13px; color: var(--muted); min-width: 90px; }
+    /* T26: tabular figures keep count/freshness ticks from jittering horizontally
+       as digits change on every refresh — an instrument readout, not prose. */
+    #status { font-size: 13px; color: var(--muted); min-width: 90px; font-variant-numeric: tabular-nums; }
+    .chip { font-variant-numeric: tabular-nums; } /* counts stay put when they tick */
     /* Static shift only — color + underline, no motion — so failure reads as a
        distinct state at a glance even while reading the map. */
     #status.error { color: var(--error); text-decoration: underline; text-underline-offset: 2px; }
@@ -71,6 +80,10 @@
     @media (max-width: 720px) {
       button, input[type=date] { min-height: 40px; }
       .chip { padding-top: 6px; padding-bottom: 6px; }
+      /* T26: title collapses to one line on phones — the eyebrow costs a wrap row
+         for no information gain at this width. */
+      header h1 { display: block; }
+      header h1 .eyebrow { display: none; }
     }
     /* Collapse the credit line on very small phones so "Update map" stays above
        the fold in the wrapping header. */
@@ -86,7 +99,7 @@
   <header>
     <!-- T18: h1 matches the document <title>/baseTitle so there's no
          "heatmap" vs "Activity Map" divergence between the two surfaces. -->
-    <h1>Oneida County, NY — 911 Activity Map</h1>
+    <h1><span class="eyebrow">Oneida County, NY</span><span class="title">911 Activity Map</span></h1>
     <span class="h-div" aria-hidden="true"></span>
     <label>From <input type="date" id="since" /></label>
     <label>To <input type="date" id="until" /></label>
