@@ -174,16 +174,20 @@ export function tincTimeToIso(m, d, h, min, meridiem, refDateTime) {
 // are counted as skipped, never thrown.
 export function parseTinc(html) {
   const $ = cheerio.load(String(html));
-  // Footer: "... Incidents, as of 4:27:40 AM EST 9/23/2026" supplies the reference datetime.
+  // Footer: "... Incidents, as of 4:27:40 AM EST 9/23/2026" supplies the full reference instant —
+  // time included, so a same-day row (e.g. "9/23 05:00 AM") does not compare after midnight and
+  // get mis-attributed to the prior year.
   const asOfMatch = String($.root().text()).match(
-    /as of\s+[\d:]+\s+(?:AM|PM)\b[^0-9]*(\d{1,2})\/(\d{1,2})\/(\d{4})/i
+    /as of\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)\b[^0-9]*(\d{1,2})\/(\d{1,2})\/(\d{4})/i
   );
-  const refDateTime = asOfMatch
-    ? DateTime.fromObject(
-        { month: +asOfMatch[1], day: +asOfMatch[2], year: +asOfMatch[3] },
-        { zone: config.timezone }
-      )
-    : null;
+  let refDateTime = null;
+  if (asOfMatch) {
+    const hour24 = (+asOfMatch[1]) % 12 + (/pm/i.test(asOfMatch[4]) ? 12 : 0);
+    refDateTime = DateTime.fromObject(
+      { month: +asOfMatch[5], day: +asOfMatch[6], year: +asOfMatch[7], hour: hour24, minute: +asOfMatch[2], second: +(asOfMatch[3] ?? 0) },
+      { zone: config.timezone }
+    );
+  }
 
   let skipped = 0;
   const incidents = [];
