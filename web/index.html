@@ -325,8 +325,12 @@
     // T28: recent-window markers ride on top of the heat at EVERY zoom — a fresh event should be
     // findable even while the surrounding area still reads as aggregate density. Both groups stay
     // built across mode swaps so zooming back never leaves an empty map (they persist).
+    // T17: isolating a category chip forces its per-incident points on at ANY zoom — renderIcons()
+    // already skips hiddenCats, so when one category is selected iconLayer holds only that
+    // category's markers. Detail replaces the aggregate wash: "what's here?" resolves to citable
+    // rows instead of an undifferentiated blob, without touching the default zoom-gate behavior.
     function applyZoomMode() {
-      const showIcons = map.getZoom() >= ICON_ZOOM;
+      const showIcons = map.getZoom() >= ICON_ZOOM || !!selectedCat;
       for (const l of heatLayers) map[showIcons ? 'removeLayer' : 'addLayer'](l);
       if (iconLayer) map[showIcons ? 'addLayer' : 'removeLayer'](iconLayer);
       if (recentLayer) map.addLayer(recentLayer); // always visible, any zoom
