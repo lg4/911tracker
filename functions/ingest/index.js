@@ -10,6 +10,7 @@ import {
   releaseLease,
   upsertIncidents,
   recordTickSuccess,
+  recordTickProvenance,
   recordTickFailure,
 } from '../../src/store/tableStore.js';
 
@@ -49,13 +50,19 @@ async function handler(_schedule, context) {
     const allWarnings = [];
     for (const source of config.sources) {
       try {
-        const { incidents, skipped, warnings } = await pollSource(source, {});
+        const { incidents, skipped, warnings, checksum, fetchedAt } = await pollSource(source, {});
         const { added } = await upsertIncidents(clients, incidents, nowIso, { budgetMs: 4 * 60 * 1000 });
         totalFetched += incidents.length;
         totalAdded += added;
         if (warnings.length) allWarnings.push(`${source.id}: ${warnings.join('; ')}`);
         context.log(JSON.stringify({ ts: nowIso, source: source.id, fetched: incidents.length, added, skipped, warnings }));
         await recordTickSuccess(clients, { ts: nowIso, source: source.id, fetched: incidents.length, added, skipped, warnings });
+        // T12(a): provenance for this tick so served features trace to verified bytes.
+        try {
+          await recordTickProvenance(clients, { ts: nowIso, source: source.id, url: source.url ?? '', count: incidents.length, checksum });
+        } catch (provErr) {
+          context.error(`provenance write failed for ${source.id}: ${provErr.message}`);
+        }
       } catch (perSourceErr) {
         allWarnings.push(`${source.id}: tick failed (${perSourceErr.message})`);
         context.error(`tick failed for ${source.id}: ${perSourceErr.message}`);

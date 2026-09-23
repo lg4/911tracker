@@ -1,5 +1,10 @@
+import crypto from 'node:crypto';
 import { config, configLegacy } from '../config.js';
-import { parseFeedArray, parseHtmlFallback, parseCadinet, recordToIncident, inBbox } from './parse.js';
+import { parseFeedArray, parseHtmlFallback, parseCadinet, inBbox } from './parse.js';
+
+// T12(a) provenance: hash of the raw fetched body so a stored row can be traced back to
+// exactly the bytes that were live at fetch time.
+const sha256hex = (text) => crypto.createHash('sha256').update(text).digest('hex');
 
 // Minimal polite GET: sets an honest User-Agent and enforces a timeout via AbortController.
 async function httpGetText(url, accept = 'application/json') {
@@ -94,15 +99,18 @@ async function defaultGeocodeQuery(query) {
   return first && first.lat != null ? [Number(first.lat), Number(first.lon)] : null;
 }
 
-// Poll one source by its configured kind. Returns { incidents, source, skipped, warnings }.
+// Poll one source by its configured kind. Returns { incidents, source, skipped, warnings, checksum, fetchedAt };
+// every incident is tagged with the raw-body sha256 (tickChecksum) and fetch time (fetchedAtIso) so a stored
+// row traces back to exactly the bytes that were live at fetch time (T12a).
 export async function pollSource(source, opts = {}) {
   const warnings = [];
   try {
     let rows;
     let skipped = 0;
+    let rawText = null;
     if (source.kind === 'cadinet-html') {
-      const text = await httpGetText(source.url, 'text/html');
-      ({ incidents: rows, skipped } = parseCadinet(text));
+      rawText = await httpGetText(source.url, 'text/html');
+      ({ incidents: rows, skipped } = parseCadinet(rawText));
       const geocoded = await geocodeCadinet(rows, opts, { geocodeContext: source.geocodeContext });
       // Drop geocode results that land outside this county's box (same-named streets elsewhere).
       const before = rows.length;
@@ -111,21 +119,26 @@ export async function pollSource(source, opts = {}) {
       console.log(`${source.id}: parsed ${before}, kept ${rows.length}, geocoded ${geocoded} new streets`);
     } else {
       // Oneida primary feed: structured JSON with coordinates already attached.
-      const text = await httpGetText(source.url);
+      rawText = await httpGetText(source.url);
       let data;
       try {
-        data = JSON.parse(text);
+        data = JSON.parse(rawText);
       } catch (e) {
         throw new Error(`feed returned non-JSON body: ${e.message}`);
       }
-      const parsed = parseFeedArray(data);
-      rows = parsed.incidents.map((rec) => recordToIncident(rec, { bbox: source.bbox }));
+      // parseFeedArray already normalizes each record (and applies the default Oneida bbox);
+      // re-normalizing here would drop every row since their fields are already renamed.
+      ({ incidents: rows, skipped } = parseFeedArray(data));
     }
+    const fetchedAtIso = new Date().toISOString();
+    const checksum = rawText == null ? null : sha256hex(rawText);
     return {
-      incidents: rows.filter(Boolean).map((inc) => ({ ...inc, county: source.id })),
+      incidents: rows.filter(Boolean).map((inc) => ({ ...inc, county: source.id, tickChecksum: checksum, fetchedAtIso })),
       source: source.id,
       skipped,
       warnings,
+      checksum,
+      fetchedAt: fetchedAtIso,
     };
   } catch (err) {
     warnings.push(`${source.kind === 'cadinet-html' ? 'CADInet' : 'primary'} feed failed (${err.message})`);
@@ -133,11 +146,14 @@ export async function pollSource(source, opts = {}) {
       try {
         const htmlText = await httpGetText(source.htmlUrl, 'text/html');
         const rows = parseHtmlFallback(htmlText);
+        const fetchedAtIso = new Date().toISOString();
         return {
-          incidents: rows.map((row) => ({ ...row, county: source.id })),
+          incidents: rows.map((row) => ({ ...row, county: source.id, tickChecksum: sha256hex(htmlText), fetchedAtIso })),
           source: `${source.id}/html`,
           skipped: 0,
           warnings,
+          checksum: sha256hex(htmlText),
+          fetchedAt: fetchedAtIso,
         };
       } catch (fallbackErr) {
         warnings.push(`html fallback also failed (${fallbackErr.message}); no data this tick`);

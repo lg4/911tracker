@@ -3,10 +3,33 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 import { pollSource } from '../src/ingest/fetchSource.js';
+
+const sha256hex = (text) => crypto.createHash('sha256').update(text).digest('hex');
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CADINET_HTML = readFileSync(join(here, 'fixtures', 'cadinet.snippet.html'), 'utf8');
+
+// T12(a): the primary JSON feed's raw body is hashed; every parsed row carries the tick
+// checksum + fetch time so a stored row traces back to exactly those bytes.
+test('pollSource tags incidents with the raw-body sha256 and exposes per-tick checksum/fetchedAt', async () => {
+  const realFetch = globalThis.fetch;
+  const BODY = readFileSync(join(here, 'fixtures', 'incident.sample.json'), 'utf8');
+  globalThis.fetch = async () => ({ ok: true, text: async () => BODY });
+  try {
+    const result = await pollSource({ id: 'oneida', kind: 'json', url: 'http://stub.local/incident.sample.json' }, {});
+    assert.equal(result.checksum, sha256hex(BODY));
+    assert.ok(result.fetchedAt && !Number.isNaN(Date.parse(result.fetchedAt)));
+    assert.ok(result.incidents.length > 0);
+    for (const inc of result.incidents) {
+      assert.equal(inc.tickChecksum, sha256hex(BODY));
+      assert.equal(inc.fetchedAtIso, result.fetchedAt);
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
 
 // Stub fetch: the feed GET returns the fixture table; Nominatim is never hit because we
 // inject fetchQuery directly via opts.

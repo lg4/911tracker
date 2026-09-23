@@ -2,7 +2,8 @@
 // and supports ES module imports of shared src/ modules — the legacy function.json
 // layout does not on node ~4.
 import { app } from '@azure/functions';
-import { createTableClients, fetchRange } from '../../src/store/tableStore.js';
+import { createTableClients, fetchRange, assessFreshness } from '../../src/store/tableStore.js';
+import { config } from '../../src/config.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -33,7 +34,8 @@ async function handler(req, context) {
     }
 
     const cs = process.env.AZURE_TABLES_CONNECTION_STRING || process.env.AzureWebJobsStorage;
-    const geojson = await fetchRange(createTableClients(cs), {
+    const clients = createTableClients(cs);
+    const geojson = await fetchRange(clients, {
       since: sinceIso,
       until: untilIso,
       type: q.type || undefined,
@@ -41,6 +43,13 @@ async function handler(req, context) {
       county: q.county || undefined,
       limit,
     });
+    // T12(a): detect drift between table state and a fresh fetch before serving — if any
+    // source's last verified tick is stale, flag the collection rather than serve silently.
+    try {
+      geojson.provenance = await assessFreshness(clients, config.sources.map((s) => s.id));
+    } catch (provErr) {
+      context.log(`provenance check skipped: ${provErr.message}`);
+    }
     // The v4/Kestrel host coerces object bodies via .toString() ("[object Object]")
     // and defaults Content-Type to text/plain; serialize explicitly + declare JSON.
     return {

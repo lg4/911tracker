@@ -77,6 +77,10 @@ function toEntity(inc, { partitionKey, firstSeenAt, pollCount, originPartition }
     dateFirst: inc.dateFirstIso,
     createdAt: inc.createdAtIso,
     lastEditedAt: inc.lastEditedAtIso,
+    // T12(a) provenance: which verified tick produced this row (raw-body hash + fetch time).
+    tickChecksum: inc.tickChecksum,
+    fetchedAtIso: inc.fetchedAtIso,
+    lastStatusChangeAt: inc.lastStatusChangeAt,
   };
   for (const [k, v] of Object.entries(strings)) if (v != null) e[k] = v;
   e.departments = JSON.stringify(Array.isArray(inc.departments) ? inc.departments : []);
@@ -136,13 +140,20 @@ export async function upsertIncidents(clients, incidents, nowIso, opts = {}) {
     const pollCount = existing ? Number(existing.pollCount ?? 0) + 1 : 1;
     if (!existing) added += 1;
 
+    const statusChanged = !existing || existing.status !== inc.status;
+
     // Primary write goes to the current-month partition (queries default to recent months).
-    const primary = toEntity({ ...inc, lastSeenAt: nowIso }, {
-      partitionKey: curMonth,
-      firstSeenAt,
-      pollCount,
-      originPartition: pinnedPartition,
-    });
+    // T12(a): stamp when this row's status last diverged from its stored state so a served
+    // feature can be flagged "status changed after storage" without re-reading history.
+    const primary = toEntity(
+      { ...inc, lastSeenAt: nowIso, ...(statusChanged && existing ? { lastStatusChangeAt: nowIso } : {}) },
+      {
+        partitionKey: curMonth,
+        firstSeenAt,
+        pollCount,
+        originPartition: pinnedPartition,
+      }
+    );
     if (pinnedPartition === curMonth) {
       await upsertReplace(clients.incidents, primary);
     } else {
@@ -156,7 +167,6 @@ export async function upsertIncidents(clients, incidents, nowIso, opts = {}) {
       await upsertReplace(clients.incidents, primary);
     }
 
-    const statusChanged = !existing || existing.status !== inc.status;
     if (statusChanged && inc.status != null) {
       await upsertReplace(clients.statusHistory, {
         partitionKey: pinnedPartition,
@@ -242,6 +252,11 @@ export async function fetchRange(clients, opts = {}) {
         callNumber: r.callNumber,
         dateFirst: r.dateFirst,
         lastSeenAt: r.lastSeenAt,
+        // T12(a) provenance: which verified tick produced this row + whether its status
+        // has changed since first storage (set only on a divergence from stored state).
+        tickChecksum: r.tickChecksum,
+        fetchedAtIso: r.fetchedAtIso,
+        lastStatusChangeAt: r.lastStatusChangeAt,
       },
     })),
   };
@@ -315,6 +330,48 @@ export async function recordTickSuccess(clients, stats) {
     warnings: JSON.stringify(stats.warnings ?? []),
     errors: 0,
   });
+}
+
+// T12(a): per-tick provenance. Appends an immutable audit row and refreshes a pointer row
+// per source so any served feature can be traced back to a verified tick (url, count, hash).
+export async function recordTickProvenance(clients, info) {
+  const ts = info.ts ?? new Date().toISOString();
+  await upsertReplace(clients.meta, {
+    partitionKey: 'meta',
+    rowKey: `prov:${Math.floor(Date.now() / 1000)}:${sha8(info.checksum ?? '')}`,
+    ts,
+    source: info.source ?? '',
+    url: info.url ?? '',
+    fetched: Number(info.count ?? 0),
+    checksum: info.checksum ?? '',
+  });
+  await upsertReplace(clients.meta, {
+    partitionKey: 'meta',
+    rowKey: `tick:${info.source}`,
+    ts,
+    url: info.url ?? '',
+    fetched: Number(info.count ?? 0),
+    checksum: info.checksum ?? '',
+  });
+}
+
+export async function latestTick(clients, sourceId) {
+  return getRow(clients.meta, 'meta', `tick:${sourceId}`);
+}
+
+// T12(a): drift detection before serving. A tick older than this is "stale" — the table
+// state no longer reflects a fresh fetch of the live feed (polling cadence is ~10 min).
+const STALE_TICK_MS = 30 * 60 * 1000;
+
+export async function assessFreshness(clients, sourceIds, nowMs = Date.now()) {
+  const ticks = [];
+  let stale = false;
+  for (const id of sourceIds) {
+    const t = await latestTick(clients, id);
+    if (!t || nowMs - new Date(t.ts).getTime() > STALE_TICK_MS) stale = true;
+    ticks.push({ source: id, lastFetchedAt: t?.ts ?? null, checksum: t?.checksum ?? null });
+  }
+  return { stale, ticks };
 }
 
 export async function recordTickFailure(clients, message) {

@@ -7,6 +7,9 @@ import {
   acquireLease,
   releaseLease,
   recordTickSuccess,
+  recordTickProvenance,
+  latestTick,
+  assessFreshness,
 } from '../src/store/tableStore.js';
 
 // --- in-memory stand-in for @azure/data-tables TableClient -------------------
@@ -274,6 +277,94 @@ test('recordTickSuccess writes last_poll and resets error counter', async () => 
   assert.equal(row.fetched, 5);
   assert.equal(row.added, 2);
   assert.equal(row.errors, 0);
+});
+
+test('upserted rows carry tick provenance; lastStatusChangeAt only on divergence from stored state', async () => {
+  const bs = makeFakeBackstore();
+  const clients = clientsFrom(bs);
+  await upsertIncidents(
+    clients,
+    [incident({ tickChecksum: 'abc123def456', fetchedAtIso: '2026-09-10T12:00:00.000Z' })],
+    '2026-09-10T12:00:00.000Z'
+  );
+  const partKey = '2026-09';
+  const rowA = bs.tables.get('incidents').get(`${partKey}\u0000ID:42`);
+  assert.equal(rowA.tickChecksum, 'abc123def456');
+  assert.equal(rowA.fetchedAtIso, '2026-09-10T12:00:00.000Z');
+  // First storage is not a status change — no flag yet.
+  assert.equal(rowA.lastStatusChangeAt, undefined);
+
+  // Re-polls always carry the tick's provenance tags (pollSource adds them), so they
+  // survive Replace-mode upserts without wiping step 1's checksum.
+  const tagged = () => incident({ tickChecksum: 'abc123def456', fetchedAtIso: '2026-09-10T12:00:00.000Z' });
+
+  // Same status re-poll: still no flag.
+  await upsertIncidents(clients, [tagged()], '2026-09-10T12:10:00.000Z');
+  assert.equal(bs.tables.get('incidents').get(`${partKey}\u0000ID:42`).lastStatusChangeAt, undefined);
+
+  // Status divergence from stored state stamps the flag.
+  await upsertIncidents(
+    clients,
+    [incident({ ...tagged(), status: 'Resolved' })],
+    '2026-09-10T12:20:00.000Z'
+  );
+  const rowB = bs.tables.get('incidents').get(`${partKey}\u0000ID:42`);
+  assert.equal(rowB.status, 'Resolved');
+  assert.equal(rowB.lastStatusChangeAt, '2026-09-10T12:20:00.000Z');
+
+  // Served features surface all three provenance fields.
+  const geo = await fetchRange(clients, { since: '2026-09-01T00:00:00Z', until: '2026-09-30T00:00:00Z' });
+  const f = geo.features[0];
+  assert.equal(f.properties.tickChecksum, 'abc123def456');
+  assert.equal(f.properties.fetchedAtIso, '2026-09-10T12:00:00.000Z');
+  assert.equal(f.properties.lastStatusChangeAt, '2026-09-10T12:20:00.000Z');
+});
+
+test('recordTickProvenance writes an immutable prov audit row and a refreshed tick pointer', async () => {
+  const bs = makeFakeBackstore();
+  const clients = clientsFrom(bs);
+  const ts = '2026-09-10T12:00:00.000Z';
+  await recordTickProvenance(clients, { ts, source: 'oneida', url: 'http://feed.example', count: 7, checksum: 'deadbeef' });
+  const meta = bs.tables.get('meta');
+  const tickRow = meta.get(`meta\u0000tick:oneida`);
+  assert.deepEqual(
+    [tickRow.ts, tickRow.url, tickRow.fetched, tickRow.checksum],
+    ['2026-09-10T12:00:00.000Z', 'http://feed.example', 7, 'deadbeef']
+  );
+  // The audit row is append-only: keyed by second+checksum so repeated ticks never overwrite history.
+  const provRows = [...meta.values()].filter((e) => e.rowKey.startsWith('prov:'));
+  assert.equal(provRows.length, 1);
+  assert.match(provRows[0].rowKey, /^prov:\d+:./);
+
+  // A later tick refreshes the pointer but appends a new audit row (different checksum).
+  await recordTickProvenance(clients, { ts: '2026-09-10T12:10:00.000Z', source: 'oneida', url: 'http://feed.example', count: 8, checksum: 'cafebabe' });
+  assert.equal(meta.get(`meta\u0000tick:oneida`).ts, '2026-09-10T12:10:00.000Z');
+  assert.equal([...meta.values()].filter((e) => e.rowKey.startsWith('prov:')).length, 2);
+});
+
+test('assessFreshness flags missing sources and ticks older than 30 minutes as stale', async () => {
+  const bs = makeFakeBackstore();
+  const clients = clientsFrom(bs);
+  const nowMs = Date.parse('2026-09-10T12:45:00.000Z');
+  const freshTs = '2026-09-10T12:40:00.000Z'; // 5 min ago
+  const staleTs = '2026-09-10T12:10:00.000Z'; // 35 min ago
+  await recordTickProvenance(clients, { ts: freshTs, source: 'a', count: 1, checksum: 'aa' });
+  await recordTickProvenance(clients, { ts: staleTs, source: 'b', count: 2, checksum: 'bb' });
+
+  assert.equal((await latestTick(clients, 'a')).checksum, 'aa');
+  assert.equal(await latestTick(clients, 'missing'), null);
+
+  const res = await assessFreshness(clients, ['a', 'b', 'missing'], nowMs);
+  assert.equal(res.stale, true);
+  assert.deepEqual(
+    res.ticks.map((t) => [t.source, t.lastFetchedAt]),
+    [['a', freshTs], ['b', staleTs], ['missing', null]]
+  );
+
+  // All sources fresh → not stale.
+  await recordTickProvenance(clients, { ts: freshTs, source: 'b', count: 2, checksum: 'bb2' });
+  const ok = await assessFreshness(clients, ['a', 'b'], nowMs);
+  assert.equal(ok.stale, false);
 });
 
 test('fetchRange applies day-granular since/until inside month partitions', async () => {
