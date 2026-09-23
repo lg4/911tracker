@@ -107,6 +107,30 @@ is pure-CSS tile inversion of those tiles, light mode serves the raw unstyled py
 mode therefore looks plainer than typical styled basemaps; that's a consequence of the keyless /
 offline constraint, not a rendering bug. Regenerate the pyramid via `scripts/gen-tiles.js`.
 
+## Cloudflare CDN fronting — human cutover checklist (blocked-unattended item)
+
+Blocked overnight by design: no owned domain, no Cloudflare account/API token locally, and no DNS
+zones in the subscription. When a human takes this on, follow in order; nothing here touches the
+live path until step 6 flips DNS.
+
+1. **Create** a Cloudflare account and add an owned zone for a domain you control (free tier is
+   enough). Do not point it at the default `*.azurestaticapps.net` hostname — CF cannot take that
+   over; the app has no custom domain today.
+2. **Add CF records** for the subdomain(s) serving the map (e.g. `map.example.com`), all proxy
+   enabled ("orange cloud"), pointing at the SWA origin
+   `salmon-smoke-0f761930f.5.azurestaticapps.net`.
+3. **Verify the origin works through CF**: browse via the new hostname; confirm `/tiles/{z}/{x}/{y}.png`,
+   the SPA index, and `https://o911func-e10tr1.azurewebsites.net/api/incidents` are all reachable
+   from the browser. CORS already allows the configured `ALLOWED_ORIGIN` — if the API base moves to
+   the new domain, update `web/config.js`'s function-app URL *and* the function's `ALLOWED_ORIGIN`
+   setting together, then re-deploy both lanes (`deploy-web` + `deploy-functions`).
+4. **Cache rules**: set a long TTL on `/tiles/` (immutable content per z/x/y; add `no-cache` or short
+   TTL only if you ever regenerate the pyramid in place); keep the SPA index and `/api/*` uncached
+   or very short so data freshness is never masked by CDN cache.
+5. **Prefetch/warm** the tile pyramid once after cutover so first paint isn't cold-origin bound.
+6. **Flip DNS** for the zone to Cloudflare nameservers only after steps 2–5 verify cleanly, then
+   monitor one ingest tick and one map load end-to-end before declaring done.
+
 ## Secrets map (never print these)
 
 | Secret | Where | Used by |
