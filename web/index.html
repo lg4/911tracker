@@ -130,6 +130,7 @@
   <script src="vendor/leaflet.js"></script>
   <script src="vendor/leaflet-heat.js"></script>
   <script src="./config.js"></script>
+  <script src="./classify.js"></script>
   <script src="./csvExport.js"></script>
   <script>
     // Central-NY focus box; the app is fully self-contained (local vendored
@@ -168,47 +169,8 @@
     // T30: swap heat ↔ per-incident icons as the user crosses ICON_ZOOM.
     map.on('zoomend', applyZoomMode);
 
-    // Incident categories (T8): raw feed types are far too varied and numerous to show
-    // as chips individually, so classify each incident into one of these for filtering
-    // and heat coloring. Keyword rules over type+title; unmatched → other.
-    const CATS = [
-      { key: 'police', label: 'Police', color: '#4361ee' },
-      { key: 'fire', label: 'Fire', color: '#e63946' },
-      { key: 'ems', label: 'EMS', color: '#2a9d8f' },
-      // T29: civil/welfare assistance calls that match none of the service keywords
-      // ("ASSIST", "VTL COMPLAINT", "MVA-UNKNOWN", "RUNAWAY", …) — previously ~44 rows
-      // of the 67-row Other bucket; uninterpretable CAD noise stays in other.
-      { key: 'civil', label: 'Civil', color: '#f4a261' },
-      { key: 'other', label: 'Other', color: '#9aa0b4' },
-    ];
-    // T14: numeric CAD dispatch codes (06D02-BREATHING PROBLEMS, 31D04-UNCONSCIOUS/FAINTING,
-    // 33C07-TRANSFER, …) all follow the XX[BCD]YY pattern and are EMS responses.
-    const EMS_CODE_RX = /^\d{2}[BCD]\d{2}\b/i;
-    const CATEGORY_RX = {
-      // T29: elevator entrapments are handled by the FD like any other technical rescue.
-      fire: /\b(FIRE|BURN(?:ING)?|SMOKE|CARBON MONOXIDE|HAZMAT|CHEMICAL|ALARM|ELEVATOR RESCUE)\b|MVA-FD/i,
-      // No bare ASSIST here: it is tested before police and would sink police-support
-      // types ("POLICE ASSIST", "OFFICER ASSIST") into EMS. A standalone "ASSIST" row
-      // falls through to Other — safer than mis-bucketing a support call as EMS.
-      ems: /\b(EMS|MEDICAL|AMBULANCE|TRANSFER|SICK|INJUR\w*|HEART\b|STROKE|LACERATION|HEMORRHAGE|CHEST PAIN|FALL(?:EN)?|OVERDOSE|UNRESPONSIVE|UNCONSCIOUS|FAINTING|RESPIRAT\w*|BREATH(?:ING)?|CARDIAC|SEIZURE|CONVULSI\w*|DIABETIC|BP READ)\b|MVA-MED/i,
-      police: /\b(POLICE|OFFICER|DOMESTIC|TRESPASS\S*|SUSPICIOUS|MISSING PERSON|CRIMINAL|CRIM\b|WELFARE|THEFT|ROBBERY|ASSAULT|FIGHT\b|DISORDERLY|SHOOTING|REPORT\w*|DRUG\S*|DISPUTE|LARCENY|HARASSMENT|FRAUD|BURGLARY|LOCKOUT|NOISE COMPLAINT|SHOTS FIRED|VEHICLE STOLEN|ORDER OF PROTECTION|PROPERTY (?:FOUND|LOST)|TRAFFIC HAZARD|DISABLED VEHICLE|PREMISE CHECK|INVESTIGAT\w*|JUVENILE|NEIGHBOR PROBLEM|ANIMAL)\b|\bPD\b|MVA-PD/i,
-      // T29: tested AFTER police so "POLICE ASSIST" / "NOISE COMPLAINT"-style rows keep
-      // their current buckets; only the residual civil/welfare-assistance set lands here.
-      // F{1,2}O{1,2}UND tolerates feed typos ("FOOUND PERSON").
-      civil: /\b(ASSIST(?:ANCE)?|VTL|RUNAWAY|F{1,2}O{1,2}UND PERSON|TRAFFIC COMPLAINT|MVA-UNKNOWN|MVA-PI|STATUS CHECK)\b/i,
-    };
-    function classify(f) {
-      const type = (f.properties.type ?? '').toUpperCase();
-      const text = `${type} ${f.properties.title ?? ''}`.toUpperCase();
-      if (CATEGORY_RX.fire.test(text)) return 'fire';
-      if (EMS_CODE_RX.test(type) || CATEGORY_RX.ems.test(text)) return 'ems';
-      if (CATEGORY_RX.police.test(text)) return 'police';
-      // T29 was documented as moving these rows to civil but the branch was never wired up
-      // — classify() fell straight through to other, so ~44 rows sat in Other despite a
-      // live Civil chip + regex. Test civil before other; residual CAD noise stays other.
-      if (CATEGORY_RX.civil.test(text)) return 'civil';
-      return 'other';
-    }
+    // Incident categories (T8): CATS + classify() now ship from ./classify.js (loaded
+    // above), which attaches both to globalThis and is unit-tested in test/classify.test.js.
 
     // T16: static legend inside the "About this data" panel — one colored dot per
     // category so chip colors read as map colors without trial and error.
