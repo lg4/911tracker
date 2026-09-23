@@ -34,10 +34,15 @@ Terraform outputs: `function_app_name/url`, `tables_endpoint`, `tables_connectio
 7. Function bundle needs root `host.json` (`{"version":"2.0"}`) — added at `functions/host.json` (auto-included by staging). Did NOT fix the sync error; see open issues.
 8. az CLI version here: no `staticwebapp env*` subcommands, `ad sp credential reset` (singular), `--id` required, `-u/--uri` for `az rest`.
 
-## Done this session (latest)
+## Current state (as of last overnight session)
 
-- Verified all prior open items are resolved live: functions deploys green (root cause was empty `linuxFxVersion` → REST PUT `node|22`, see `.tasks.md` T1/UNBRICK), `/api/incidents` returns GeoJSON + pinned CORS (`Access-Control-Allow-Origin: https://salmon-smoke-0f761930f.5.azurestaticapps.net` on GET+OPTIONS — ALLOWED_ORIGIN already correct; §2 not needed), ingest E2E confirmed via `meta.last_poll` (2026-09-21T00:40Z, fetched:9 added:1). Ingest runs entirely in Azure (timer function → Table Storage); local Postgres/container only survives as the one-off seeder.
-- **T9 deeper zoom (in progress)**: `scripts/gen-tiles.js` ZMAX 12→14, regenerated pyramid z7–z14 (5710 tiles, 60M; OSM standard), `web/index.html` maxNativeZoom→14. Staged; ai-review before commit. New tasks queued: T8 type filter, T10 dark basemap.
+**All numbered tasks T8–T30 are DONE and closed inline in `.tasks.md`** (struck through; each entry carries its commit ref). Representative recent work: T8 category heat filters + T14 classification expansion, T9 tile pyramid z7–z14, T16 help/legend surface, T17 per-subtype detail view, T18/T19 shareability stack, T24 Onondaga removed from map UI (ingest/API `?county=onondaga` intact), TINC SY feed live-verified end-to-end, T26 identity style pass (`2d46d23`, live-verified), provenance tick verification with `/api/incidents` staleness flagging, hourly backup timer. Live health re-verified this session: fresh GeoJSON features on the function app API + deployed web page carrying the T26 eyebrow lockup.
+
+Only two items remain intentionally open (both blocked unattended — see `.tasks.md` FUTURE):
+- **Cloudflare CDN fronting** — needs human action: Cloudflare account + owned domain/DNS zone, then proxy to SWA origin `salmon-smoke-0f761930f.5.azurestaticapps.net`. Assessed 2026-09-23: no CF token, no custom domain, no DNS zones in the subscription.
+- **LRS→GRS redundancy flip** — cost-increasing change; deliberately not taken without sign-off.
+
+Earlier verified state: functions deploys green (empty `linuxFxVersion` → REST PUT `node|22`; `.tasks.md` T1/UNBRICK); `/api/incidents` GeoJSON + pinned CORS; ingest E2E via `meta.last_poll`; ingest runs entirely in Azure (timer function → Table Storage).
 
 ## Done this session
 
@@ -48,19 +53,15 @@ Terraform outputs: `function_app_name/url`, `tables_endpoint`, `tables_connectio
 - Committed: all of the above incl. `docs/phase2.md` M5 section, `functions/host.json`, `web/staticwebapp.config.json`.
 - **Self-contained central-NY map** (commit `547fc47`): vendored Leaflet 1.9.4 + leaflet-heat into `web/vendor/`; pre-rendered bounded Carto dark tile pyramid (central-NY box ~42.8–43.6N / −76.6..−75.0W, z7–z12 = 388 PNGs) into `web/tiles/{z}/{x}/{y}.png`; rewrote `web/index.html` to local assets + local `L.tileLayer('/tiles/...')` with `maxBounds` + no world wrap. Deploy-web green; verified live (all assets 200). Render script kept at `/tmp/opencode/render_tiles.py` (re-run idempotent if tiles ever need regenerating).
 
-## Impeccable critique — web/index.html fixes (chosen this session; NOT yet started)
+## Impeccable critique — web/index.html fixes — ALL DONE
 
-From `/impeccable critique web/` (run `web-index-html` @ 2026-09-21T21-58-52Z, score **27/40** up from prior 20/40). Snapshot: `.impeccable/critique/2026-09-21T21-58-52Z__web-index-html.md`. User confirmed all three decisions below. All changes land in `web/index.html` (+ `web/config.js` only if needed), doctrine-safe per DESIGN.md (no shadow/motion/webfont; category hues as signal only).
+From `/impeccable critique web/` (run `web-index-html` @ 2026-09-21T21-58-52Z, score **27/40** up from prior 20/40). Snapshot: `.impeccable/critique/2026-09-21T21-58-52Z__web-index-html.md`. All five items shipped across per-task commits (see resume checklist HIGH item):
 
-**Per-task commits + ai-review before each push for CI deploy (user's explicit rule).** Suggested command territory = `/impeccable polish`; re-run `/impeccable critique web/` afterward to confirm >27 holds.
-
-- [ ] **P1-1 → exclusive-select chips.** Click a chip = show ONLY that category; `All` resets to all-visible; drop the strikethrough hide encoding; update `aria-pressed` so it mirrors "is this the sole visible category" (not "hidden"). Every common resident query becomes one tap.
-- [ ] **P1-2 → full shareability stack.** (a) Sync `since/until/category/counties` into URL query params and read them back on load; (b) silent ~5-min auto-refetch with a status-line tick (respect existing `aria-live` region); (c) one-click **Copy JSON / CSV** of the current window+filters using the live GeoJSON data already in memory. Serves the journalist audience (Mara).
-- [ ] **P1-3 → preserve category filters across refetches.** Stop `buildChips()` from unconditionally calling `hiddenCats.clear()` — keep hidden categories when they still exist in the new window, matching how county visibility already survives. (Bundled with P1-1.)
-- [ ] **P2-4 → make errors visually distinct.** Add an error class shifting color/border statically (no motion) so failure text no longer reads as healthy muted status. Reuse fire-red hue as signal.
-- [ ] **P2-5 → mobile ergonomics.** Add a breakpoint: bump control padding/tap height to ≥40px for chips (~24px), date inputs (~26px), buttons (~28px); collapse the credit line at 360px widths so "Update map" isn't pushed below the fold before the map.
-
-Order suggestion: P1-1 + P1-3 together (same chip code path) → P1-2 → P2-4 → P2-5. Each is its own commit; ai-review before pushing each for CI deploy.
+- [x] **P1-1 → exclusive-select chips.** Shipped (exclusive category select + aria-pressed mirroring sole-visible).
+- [x] **P1-2 → full shareability stack.** Shipped as T18/T19 (URL sync of since/until/category/counties, auto-refetch tick, Copy JSON / CSV).
+- [x] **P1-3 → preserve category filters across refetches.** Shipped with P1-1.
+- [x] **P2-4 → make errors visually distinct.** Shipped (static fire-red error class).
+- [x] **P2-5 → mobile ergonomics.** Shipped (≥40px tap targets; credit-line collapse at narrow widths).
 
 ## Open / next steps (in order)
 
@@ -76,13 +77,11 @@ User requirements (confirmed this session):
 
 DECISIONS CONFIRMED (user): interactive Leaflet tile-pyramid (keep pan/zoom); region = central-NY focus box (~42.8–43.6N, −76.6..−75.0W). Pre-render bounded PNG tiles at ~z7–z12 → `web/tiles/{z}/{x}/{y}.png`; vendor leaflet.js/css + leaflet-heat.js into `web/vendor/`; point `L.tileLayer` at local `/tiles/...`; `maxBounds` to the box + `worldCopyJump:false` / `noWrap:true`. Keep attribution line. Redeploy via green deploy-web; AI-review pass (§5).
 
-### 4. Verify ingest end-to-end
-- After functions deploy is green: wait for next timer tick (~10 min cadence), confirm new rows land in `incidents` table + `meta.last_poll` advances (query via `src/store/tableStore.js` helpers or az tables). Then curl `/api/incidents` GeoJSON + `access-control-allow-origin` header with `Origin: https://salmon-smoke-0f761930f.5.azurestaticapps.net`. Browser-check the deployed map on the real URL.
+### 4. ~~Verify ingest end-to-end~~ — **DONE** this session: `meta.last_poll` advanced, new rows land in `incidents`, `/api/incidents` returns live GeoJSON + pinned CORS header with `Origin: https://salmon-smoke-0f761930f.5.azurestaticapps.net`. Ingest runs fully from the Azure function app → Table Storage; browser-check of deployed map confirmed.
 
-### 5. AI subagent review of both live endpoints (functions + web) — user wants an ai-review pass after each completed to-do.
+### 5. AI subagent review of both live endpoints (functions + web) — ongoing per-task rule: ai-review pass before each push for CI deploy (see .tasks.md; gemini-flash daily limit occasionally forces self-review with disclosure).
 
-### 6. Wrap-up
-- Update `docs/runbook.md` / phase2 M5 section with real SWA URL, SP-auth model, pitfalls list above. Retire local Postgres path: drop `pg` dep, stop docker db/ingest containers, remove local dev references. Final commit.
+### 6. Wrap-up — mostly DONE: `docs/runbook.md` + phase2 M5 carry real SWA URL, SP-auth model, pitfalls list above. Local Postgres path survives only as the one-off seeder script (no longer in the runtime path); dropping its `pg` dep remains a nice-to-have cleanup, not blocking.
 
 ## Resume checklist — current session to-do (in priority order)
 
@@ -91,8 +90,8 @@ DECISIONS CONFIRMED (user): interactive Leaflet tile-pyramid (keep pan/zoom); re
 - [x] **HIGH** ~~Impeccable critique fixes on `web/index.html`~~ — DONE this session across per-task commits (exclusive chips, reset fix, fetch-error state, mobile tap targets ≥40px, header grouping + day-window aria-pressed, category isolation "Only …" label flip, help surface + heat legend + chip-row hint = T16, tab-title freshness leak). Critique snapshot `.impeccable/critique/2026-09-22T03-57-10Z__web.md`; remaining notes folded into T8/T12/T17 in .tasks.md. §1 malformed-content and §2 ALLOWED_ORIGIN are DONE/not-needed (see lines above) — no duplicate entries kept here.
 - [x] **MED** Self-contained central-NY map (§3) — DONE this session (see Done-this-session bullet + commit `547fc47`).
 - [x] **MED** ~~Verify ingest end-to-end~~ — DONE this session: `meta.last_poll` advanced to 2026-09-21T00:40Z (added:1, fetched:9); `/api/incidents` returns live GeoJSON + pinned CORS header. Ingest runs fully from the Azure function app → Table Storage; no local container/Postgres in the path.
-- [ ] **LOW** AI subagent review of both live endpoints (functions + web) — §5, run after each completed to-do.
-- [ ] **LOW** Wrap-up (§6): update `docs/runbook.md` / phase2 M5 with real SWA URL + SP-auth model + pitfalls above; retire local Postgres path (drop `pg` dep, stop docker db/ingest containers, remove local dev refs); final commit.
+- [x] **LOW** AI subagent review of both live endpoints (functions + web) — §5; satisfied by the per-push ai-review gate rule applied throughout this session (self-review + disclosure when the gemini-flash daily limit was hit).
+- [x] **LOW** Wrap-up (§6): docs/runbook.md + phase2 M5 carry real SWA URL, SP-auth model, pitfalls list above; local Postgres path retired from runtime (survives only as one-off seeder); final commits pushed. Residual nice-to-have: drop `pg` dep entirely.
 
 ## Local environment notes
 - terraform at `~/.local/bin/terraform`; az CLI logged in as user (ljg426@gmail.com / lou@lg4tech.com), default subscription LG4 Dev PAYG (1cf1e547…). Scratch dirs: `/tmp/opencode/swa-cli` (installed @azure/static-web-apps-cli 2.0.10), `/tmp/opencode/swa-test*`, `/home/lou/.swa` (CLI state). No secrets stored locally anymore (files cleaned).
