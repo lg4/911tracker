@@ -305,7 +305,7 @@
     // shape that rendered raw UTC. The category label leads line one (color carries it too).
     function m_addIcon(lat, lng, c, props) {
       const color = CATS.find((x) => x.key === c).color;
-      const m = L.circleMarker([lat, lng], { radius: 12, color, weight: 1.5, fillColor: color, fillOpacity: 1 });
+      const m = L.circleMarker([lat, lng], { radius: 6, color, weight: 1.5, fillColor: color, fillOpacity: 0.85 });
       // bindPopup inserts content as HTML, so every feed-controlled value must be entity-escaped —
       // a CAD row carrying <script>/<img onerror=…> in any field would otherwise run in each visitor.
       const esc = (s) => String(s).replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
